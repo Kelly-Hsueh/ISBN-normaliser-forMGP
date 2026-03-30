@@ -14,7 +14,6 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 
-
 ISBN_TEMPLATE_RE = re.compile(
     r"\{\{\s*ISBN\s*\|\s*(?P<code>[^|{}\n]+?)\s*(?:\|\s*(?P<label>[^{}\n]*?)\s*)?\}\}",
     re.IGNORECASE,
@@ -230,7 +229,8 @@ def hyphenate_isbn10(code10: str,
             normalized = f"{group.group}-{registrant}-{publication}-{code10[-1]}"
             return f"ISBN {normalized}" if with_label else normalized
 
-    raise ValueError("Could not map ISBN-10 to a registration group/range rule.")
+    raise ValueError(
+        "Could not map ISBN-10 to a registration group/range rule.")
 
 
 def normalise_token(raw_isbn: str,
@@ -266,10 +266,11 @@ def normalise(raw_isbn: str,
     )
 
 
-def normalise_isbn_templates(text: str,
-                             xml_path: Path,
-                             convert_10_to_13: bool = False,
-                             drop_equal_label: bool = False) -> tuple[str, int]:
+def normalise_isbn_templates(
+        text: str,
+        xml_path: Path,
+        convert_10_to_13: bool = False,
+        drop_equal_label: bool = False) -> tuple[str, int]:
     groups = load_groups(xml_path)
     changed = 0
 
@@ -310,8 +311,8 @@ def normalise_isbn_templates(text: str,
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Normalize ISBN-10/13 to hyphenated format using ISBN range XML rules."
-    )
+        description="Normalize ISBN-10/13 to hyphenated format "
+        "using ISBN range XML rules.")
     parser.add_argument(
         "isbn",
         nargs="?",
@@ -346,12 +347,14 @@ def main() -> int:
     parser.add_argument(
         "--drop-equal-label",
         action="store_true",
-        help="When template param2 is semantically the same ISBN as param1, remove param2.",
+        help="When template param2 is semantically the same ISBN as param1, "
+        "remove param2.",
     )
     parser.add_argument(
         "--in-place",
         action="store_true",
-        help="When --text-file is used, overwrite the file with normalised output.",
+        help="When --text-file is used, "
+        "overwrite the file with normalised output.",
     )
 
     args = parser.parse_args()
@@ -380,7 +383,8 @@ def main() -> int:
         return 0
 
     if not args.isbn:
-        print("Error: ISBN input is required unless --text-file is used.", file=sys.stderr)
+        print("Error: ISBN input is required unless --text-file is used.",
+              file=sys.stderr)
         return 1
 
     try:
