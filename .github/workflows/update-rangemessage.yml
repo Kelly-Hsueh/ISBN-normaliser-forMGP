@@ -1,0 +1,29 @@
+name: Update RangeMessage
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '05 3 * * 3'
+
+jobs:
+  update-rangemessage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      
+      - name: Download RangeMessage.xml
+        run: |
+          curl -o RangeMessage.xml https://www.isbn-international.org/export_rangemessage.xml
+      
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add RangeMessage.xml
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            msg="Semiautomatically Update RangeMessage.xml by @${GITHUB_ACTOR}"
+          else
+            msg="Automatically Update RangeMessage.xml by Scheduled Workflow"
+          fi
+          git commit -m "$msg" || echo "No changes to commit"
+          git push
