@@ -71,3 +71,4 @@ Recommended workflow for a bot pipeline:
 ## Notes
 - Validation responsibility can remain with on-wiki template/module.
 - This tool focuses on deterministic normalisation and optional migration actions.
+- This tool is developed based on [ISO 2108:2017](https://www.iso.org/standard/65483.html) and [the range message file provided by the International ISBN Agency](https://www.isbn-international.org/range_file_generation).
