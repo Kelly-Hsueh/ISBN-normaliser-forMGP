@@ -1,4 +1,4 @@
-name: Update RangeMessage
+name: Update Range File
 
 on:
   workflow_dispatch:
@@ -8,6 +8,8 @@ on:
 jobs:
   update-rangemessage:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v6.0.2
       
@@ -21,9 +23,9 @@ jobs:
           git config --local user.name "GitHub Action"
           git add RangeMessage.xml
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            msg="Semiautomatically Update RangeMessage.xml by @${GITHUB_ACTOR}"
+            msg="Semiautomated update RangeMessage.xml by @${GITHUB_ACTOR}"
           else
-            msg="Automatically Update RangeMessage.xml by Scheduled Workflow"
+            msg="Automated update RangeMessage.xml by scheduled workflow"
           fi
           git commit -m "$msg" || echo "No changes to commit"
           git push
