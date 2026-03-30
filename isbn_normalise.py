@@ -2,7 +2,7 @@
 """Normalize ISBN strings to hyphenated, human-readable form.
 
 This script uses ISBN registration range rules from an ISBNRangeMessage XML file
-(such as .idea/isbn-normaliser/RangeMessage.xml).
+(such as RangeMessage.xml).
 """
 
 from __future__ import annotations
@@ -320,7 +320,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--xml",
-        default=".idea/isbn-normaliser/RangeMessage.xml",
+        default="RangeMessage.xml",
         help="Path to ISBNRangeMessage XML file.",
     )
     parser.add_argument(

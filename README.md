@@ -25,7 +25,7 @@ Rules:
 Format template ISBN values in a text file:
 
 ```bash
-python .idea/isbn-normaliser/isbn_normalise.py \
+python isbn_normalise.py \
   --text-file your_wikitext.txt \
   -format \
   --in-place
@@ -34,7 +34,7 @@ python .idea/isbn-normaliser/isbn_normalise.py \
 Format + convert ISBN-10 to ISBN-13:
 
 ```bash
-python .idea/isbn-normaliser/isbn_normalise.py \
+python isbn_normalise.py \
   --text-file your_wikitext.txt \
   -format -to13 \
   --in-place
@@ -43,7 +43,7 @@ python .idea/isbn-normaliser/isbn_normalise.py \
 Format + drop equal label (param2):
 
 ```bash
-python .idea/isbn-normaliser/isbn_normalise.py \
+python isbn_normalise.py \
   --text-file your_wikitext.txt \
   -format \
   --drop-equal-label \
