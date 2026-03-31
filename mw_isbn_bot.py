@@ -193,6 +193,11 @@ def allowbots(text: str, user: str) -> bool:
     return not re.search(pattern, text, flags=re.IGNORECASE)
 
 
+def is_underconstruction(text: str) -> bool:
+    pattern = r"\{\{(施工中|[编編][辑輯]中|inuse)(?:\|[^}]*)?\}\}"
+    return bool(re.search(pattern, text, flags=re.IGNORECASE))
+
+
 def _collect_pageids_from_transcludedin_response(
     data: dict[str, Any],
     pageids: list[int],
@@ -527,6 +532,11 @@ def process_pages(
         if not allowbots(content, bot_username):
             skipped_bots += 1
             print(f"[SKIP][bots] pageid={pageid} title={title}")
+            continue
+
+        if is_underconstruction(content):
+            skipped_bots += 1
+            print(f"[SKIP][inuse] pageid={pageid} title={title}")
             continue
 
         new_text, replacements = normalise_isbn_templates(
