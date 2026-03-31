@@ -1,29 +1,31 @@
-# ISBN Normaliser Notes
+[中文](README.md) | [English](README.en.md)
 
-Provide a standalone normaliser for `{{ISBN|...}}` template usage in wiki text:
-- Hyphenate ISBN values in template parameter 1
-- Optionally convert ISBN-10 to ISBN-13
-- Optionally drop template parameter 2 when it is semantically the same ISBN
+# ISBN 规范化器
 
-Current tool file:
-- `isbn_normalise.py`
+为萌娘百科 wikitext中的 `{{ISBN|...}}` 模板提供独立的规范化工具和 MediaWiki 机器人。
 
-Range data source:
-- `RangeMessage.xml` (International ISBN Agency range message)
+## 核心功能
 
-## Current behavior
-The script targets template syntax:
-- `{{ISBN|<param1>}}`
-- `{{ISBN|<param1>|<param2>}}`
+- **isbn_normalise.py** — 纯 ISBN 规范化库
+  - 按国际标准书号规则对 ISBN-10/13 进行连字符规范化
+  - 可选：将 ISBN-10 转换为 ISBN-13
+  - 可选：删除语义相同的第二参数
 
-Rules:
-- Always normalise template parameter 1 when possible
-- Keep parameter 2 unchanged by default
-- Remove parameter 2 only when explicitly enabled and semantically equal
+- **mw_isbn_bot.py** — MediaWiki 机器人运行时
+  - 自动获取嵌入 Template:ISBN 和其重定向的页面
+  - 支持分页查询（自动处理 continue）
+  - 检查 Allowbots 规则后再编辑
+  - 支持编辑数量上限控制
 
-## CLI usage
-Format template ISBN values in a text file:
+## 依赖资源
 
+- `RangeMessage.xml` — 国际 ISBN 中心提供的范围消息文件
+
+## 工作方式
+
+### 命令行工具
+
+**单文件格式化：**
 ```bash
 python isbn_normalise.py \
   --text-file your_wikitext.txt \
@@ -31,8 +33,7 @@ python isbn_normalise.py \
   --in-place
 ```
 
-Format + convert ISBN-10 to ISBN-13:
-
+**转换 + 转换为 ISBN-13：**
 ```bash
 python isbn_normalise.py \
   --text-file your_wikitext.txt \
@@ -40,8 +41,7 @@ python isbn_normalise.py \
   --in-place
 ```
 
-Format + drop equal label (param2):
-
+**转换 + 删除相同的标签：**
 ```bash
 python isbn_normalise.py \
   --text-file your_wikitext.txt \
@@ -50,25 +50,58 @@ python isbn_normalise.py \
   --in-place
 ```
 
-## Runtime integration (future repo)
-Recommended workflow for a bot pipeline:
-1. Build candidate page list (or template transclusion index).
-2. Fetch page text.
-3. Run `isbn_normalise.py` in text mode.
-4. Save only when changed.
-5. Use clear edit summary (format/to13/drop-equal-label flags).
+### MediaWiki 机器人
 
-## Development plan (reminder)
-1. Use transclusion index API and process results:
-   - `action=query&format=json&maxlag=3&prop=transcludedin&titles=Template%3AISBN&formatversion=2`
-   - continue handling (`continue` / `ticontinue`), batching, retry policy.
-2. Add optional helper links when fixing in specific cases:
-   - Example reminder URL:
-   - `https://grp.isbn-international.org/search/piid_solr?keys=978-7-03+%28ISBNPrefix%29`
-   - Exact trigger conditions will be specified later.
-3. https://www.isbn-international.org/range_file_generation
+**本地运行（需要 .env 文件或命令行参数）：**
+```bash
+python mw_isbn_bot.py \
+  --wiki-api https://example.org/api.php \
+  --bot-username MyBot \
+  --bot-password MyBotPassword \
+  --max-edits 10
+```
 
-## Notes
-- Validation responsibility can remain with on-wiki template/module.
-- This tool focuses on deterministic normalisation and optional migration actions.
-- This tool is developed based on [ISO 2108:2017](https://www.iso.org/standard/65483.html) and [the range message file provided by the International ISBN Agency](https://www.isbn-international.org/range_file_generation).
+**干运行（测试不保存）：**
+```bash
+python mw_isbn_bot.py \
+  --wiki-api https://example.org/api.php \
+  --bot-username MyBot \
+  --bot-password MyBotPassword \
+  --dry-run
+```
+
+## GitHub Actions 自动化
+
+在 `.github/workflows/isbn-normalizer-bot.yml` 中配置：
+
+1. **手动触发（workflow_dispatch）**
+   - 可选输入 `max_edits` 来限制本次编辑数量
+   - 访问 Actions 标签页点击"运行工作流"
+
+2. **定时执行（可选）**
+   - 取消注释 `schedule` 部分启用每日 UTC 03:30 执行
+
+## 环境变量配置
+
+在 `.env` 或 GitHub Secrets 中设置：
+
+```
+BOT_USERNAME=YourBotName
+BOT_PASSWORD=YourBotPassword
+```
+
+默认值：
+- `WIKI_API` — 默认为 `https://mzh.moegirl.org.cn/api.php`
+- `USER_AGENT` — 默认为 `ISBNNormaliserBot/1.0 (...)`
+
+## 规范化规则
+
+- 始终规范化模板第 1 参数（当有效时）
+- 默认保持第 2 参数不变
+- 仅在显式启用且语义相同时删除第 2 参数
+- 编辑摘要：`根据 [https://www.iso.org/standard/65483.html ISO 2108:2017] 调整ISBN`
+
+## 参考资料
+
+- [ISO 2108:2017](https://www.iso.org/standard/65483.html)
+- [国际 ISBN 中心](https://www.isbn-international.org/range_file_generation)
