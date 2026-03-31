@@ -99,7 +99,7 @@ BOT_PASSWORD=YourBotPassword
 - 始终规范化模板第 1 参数（当有效时）
 - 默认保持第 2 参数不变
 - 仅在显式启用且语义相同时删除第 2 参数
-- 编辑摘要：`根据 ISO 2108:2017（https://www.iso.org/standard/65483.html ）调整ISBN`
+- 编辑摘要：`根据 ISO 2108:2017（https://www.iso.org/standard/65483.html ）自动调整ISBN（若阁下对此次修改感到疑惑，可以前往 https://grp.isbn-international.org/ 查找出版社前缀信息）`
 
 ## 参考资料
 

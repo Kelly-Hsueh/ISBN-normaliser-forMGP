@@ -668,8 +668,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--summary",
-        default="根据 ISO 2108:2017（https://www.iso.org/standard/65483.html ）"
-        "调整ISBN",
+        default="根据 ISO 2108:2017（https://www.iso.org/standard/65483.html ）自动"
+        "调整ISBN（若阁下对此次修改感到疑惑，可以前往 https://grp.isbn-international.org/ 查找出版社前缀信息）",
         help="Edit summary used when saving pages.",
     )
     parser.add_argument(

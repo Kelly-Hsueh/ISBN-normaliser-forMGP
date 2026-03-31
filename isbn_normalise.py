@@ -13,11 +13,7 @@ import sys
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
-
-ISBN_TEMPLATE_RE = re.compile(
-    r"\{\{\s*ISBN\s*\|\s*(?P<code>[^|{}\n]+?)\s*(?:\|\s*(?P<label>[^{}\n]*?)\s*)?\}\}",
-    re.IGNORECASE,
-)
+import mwparserfromhell.parser
 
 
 @dataclass(frozen=True)
@@ -274,55 +270,81 @@ def normalise_isbn_templates(
     groups = load_groups(xml_path)
     changed = 0
 
-    def _replace(match: re.Match[str]) -> str:
-        nonlocal changed
-        code = match.group("code")
-        label = match.group("label")
+    # Parse the wikicode
+    code = mwparserfromhell.parse(text)
 
-        # Parameter 1 must always be normalised when valid.
+    # Find all ISBN templates (case-insensitive match)
+    templates_found = list(
+        code.filter_templates(
+            matches=lambda t: str(t.name).strip().lower() == "isbn"))
+
+    for idx, template in enumerate(templates_found, 1):
+        # Normalise template name to standard "ISBN" casing
+        template.name = "ISBN"
+
+        # Get parameter 1 (the ISBN code) - always required
+        if not template.has("1"):
+            continue
+
+        param1 = template.get("1")
+        code_str = str(param1.value).strip()
+
+        # Try to normalise parameter 1
         try:
             normalised_1 = normalise_token(
-                code,
+                code_str,
                 groups,
                 convert_10_to_13=convert_10_to_13,
                 with_label=False,
             )
         except ValueError:
-            return match.group(0)
+            # If param 1 is not a valid ISBN, skip this template
+            continue
 
-        original_code = code.strip()
-        output_label = label
-
-        # Parameter 2 is normalised only when it is itself a valid ISBN token.
-        if label is not None:
-            label_stripped = label.strip()
-            if label_stripped:
+        # Get parameter 2 (the label) if it exists
+        output_label = None
+        if template.has("2"):
+            param2 = template.get("2")
+            if label_str := str(param2.value).strip():
                 try:
                     output_label = normalise_token(
-                        label_stripped,
+                        label_str,
                         groups,
                         convert_10_to_13=convert_10_to_13,
                         with_label=False,
                     )
                 except ValueError:
-                    output_label = label
+                    # If label is not a valid ISBN, keep it as-is
+                    output_label = label_str
 
-        # Optionally drop param2 when it is semantically the same ISBN.
+        # Optionally drop param2 when it is semantically the same ISBN
         if output_label is not None:
-            key1 = isbn_equivalence_key(code)
+            key1 = isbn_equivalence_key(code_str)
             key2 = isbn_equivalence_key(output_label)
             if drop_equal_label and key1 is not None and key1 == key2:
                 output_label = None
 
-        if normalised_1 == original_code and output_label == label:
-            return match.group(0)
+        # Check if anything changed
+        original_code = code_str
+        original_label = str(
+            template.get("2").value).strip() if template.has("2") else None
 
+        if normalised_1 == original_code and output_label == original_label:
+            # No changes needed
+            continue
+
+        # Update the template
         changed += 1
         if output_label is None:
-            return f"{{{{ISBN|{normalised_1}}}}}"
-        return f"{{{{ISBN|{normalised_1}|{output_label}}}}}"
+            # Remove parameter 2 if it exists
+            if template.has("2"):
+                template.remove("2")
+        elif template.has("2"):
+            template.get("2").value = output_label
+        else:
+            template.add("2", output_label)
 
-    return ISBN_TEMPLATE_RE.sub(_replace, text), changed
+    return str(code), changed
 
 
 def main() -> int:
