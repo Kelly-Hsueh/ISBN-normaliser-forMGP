@@ -99,7 +99,7 @@ Default values:
 - Always normalise template parameter 1 (when valid)
 - Keep parameter 2 unchanged by default
 - Only drop parameter 2 when explicitly enabled and semantically identical
-- Edit summary: `根据 [https://www.iso.org/standard/65483.html ISO 2108:2017] 调整ISBN`
+- Edit summary: `根据 ISO 2108:2017（https://www.iso.org/standard/65483.html ）调整ISBN`
 
 ## References
 
