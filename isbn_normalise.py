@@ -278,8 +278,10 @@ def normalise_isbn_templates(
         nonlocal changed
         code = match.group("code")
         label = match.group("label")
+
+        # Parameter 1 must always be normalized when valid.
         try:
-            normalised = normalise_token(
+            normalised_1 = normalise_token(
                 code,
                 groups,
                 convert_10_to_13=convert_10_to_13,
@@ -291,20 +293,34 @@ def normalise_isbn_templates(
         original_code = code.strip()
         output_label = label
 
-        # Optionally drop param2 when it is semantically the same ISBN.
+        # Parameter 2 is normalized only when it is itself a valid ISBN token.
         if label is not None:
+            label_stripped = label.strip()
+            if label_stripped:
+                try:
+                    output_label = normalise_token(
+                        label_stripped,
+                        groups,
+                        convert_10_to_13=convert_10_to_13,
+                        with_label=False,
+                    )
+                except ValueError:
+                    output_label = label
+
+        # Optionally drop param2 when it is semantically the same ISBN.
+        if output_label is not None:
             key1 = isbn_equivalence_key(code)
-            key2 = isbn_equivalence_key(label)
+            key2 = isbn_equivalence_key(output_label)
             if drop_equal_label and key1 is not None and key1 == key2:
                 output_label = None
 
-        if normalised == original_code and output_label == label:
+        if normalised_1 == original_code and output_label == label:
             return match.group(0)
 
         changed += 1
         if output_label is None:
-            return f"{{{{ISBN|{normalised}}}}}"
-        return f"{{{{ISBN|{normalised}|{output_label}}}}}"
+            return f"{{{{ISBN|{normalised_1}}}}}"
+        return f"{{{{ISBN|{normalised_1}|{output_label}}}}}"
 
     return ISBN_TEMPLATE_RE.sub(_replace, text), changed
 
@@ -313,48 +329,39 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Normalize ISBN-10/13 to hyphenated format "
         "using ISBN range XML rules.")
+    parser.add_argument(help="Edit summary used when saving pages.", )
     parser.add_argument(
-        "isbn",
-        nargs="?",
-        help="Input ISBN (digits with or without separators).",
+        "--maxlag",
+        type=int,
+        default=3,
+        help="MediaWiki maxlag value.",
     )
     parser.add_argument(
-        "--xml",
-        default="RangeMessage.xml",
-        help="Path to ISBNRangeMessage XML file.",
+        "--timeout",
+        type=int,
+        default=30,
+        help="HTTP timeout (seconds).",
     )
     parser.add_argument(
-        "--no-label",
+        "--edit-interval",
+        type=float,
+        default=0.2,
+        help="Seconds to sleep between successful edits.",
+    )
+    parser.add_argument(
+        "--include-redirects",
+        default="true",
+        help="Whether to query generator=redirects transclusions (true/false).",
+    )
+    parser.add_argument(
+        "--bot-flag",
+        default="true",
+        help="Whether to submit edit with bot=1 (true/false).",
+    )
+    parser.add_argument(
+        "--dry-run",
         action="store_true",
-        help="Output without the leading 'ISBN ' label.",
-    )
-    parser.add_argument(
-        "-format",
-        "--format",
-        action="store_true",
-        help="Enable ISBN hyphenation normalization in text/template mode.",
-    )
-    parser.add_argument(
-        "-to13",
-        "--to13",
-        action="store_true",
-        help="Convert ISBN-10 input to ISBN-13 before output.",
-    )
-    parser.add_argument(
-        "--text-file",
-        help="Process a text file and normalise {{ISBN|...}} templates.",
-    )
-    parser.add_argument(
-        "--drop-equal-label",
-        action="store_true",
-        help="When template param2 is semantically the same ISBN as param1, "
-        "remove param2.",
-    )
-    parser.add_argument(
-        "--in-place",
-        action="store_true",
-        help="When --text-file is used, "
-        "overwrite the file with normalised output.",
+        help="Run full workflow but do not save edits.",
     )
 
     args = parser.parse_args()
