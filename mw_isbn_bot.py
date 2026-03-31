@@ -16,6 +16,7 @@ from isbn_normalise import normalise_isbn_templates
 DEFAULT_USER_AGENT = (
     "ISBNNormaliserBot/1.0 "
     "(https://github.com/kelly/ISBN-normaliser) requests/2.x")
+DEFAULT_WIKI_API = "https://mzh.moegirl.org.cn/api.php"
 
 
 def parse_bool_env(raw_value: str, *, default: bool) -> bool:
@@ -479,19 +480,24 @@ def main() -> int:
         action="store_true",
         help="Run full workflow but do not save edits.",
     )
+    parser.add_argument(
+        "--max-edits",
+        type=int,
+        default=None,
+        help="Maximum number of edits to perform. None means unlimited.",
+    )
 
     args = parser.parse_args()
 
     try:
         load_env_file()
 
-        wiki_api = (args.wiki_api or os.environ.get("WIKI_API", "")).strip()
+        wiki_api = args.wiki_api or DEFAULT_WIKI_API
         bot_username = (args.bot_username
                         or os.environ.get("BOT_USERNAME", "")).strip()
         bot_password = (args.bot_password
                         or os.environ.get("BOT_PASSWORD", "")).strip()
-        user_agent = (args.user_agent or os.environ.get(
-            "USER_AGENT", "")).strip() or DEFAULT_USER_AGENT
+        user_agent = args.user_agent or DEFAULT_USER_AGENT
 
         if not wiki_api:
             raise RuntimeError("WIKI_API is required (flag or environment).")
@@ -550,6 +556,7 @@ def main() -> int:
         skipped_bots = 0
         changed = 0
         failed = 0
+        max_edits = args.max_edits
 
         for pageid in pageids:
             page = pages_by_id.get(pageid)
@@ -575,6 +582,12 @@ def main() -> int:
             )
             if replacements <= 0 or new_text == content:
                 continue
+
+            if max_edits is not None and changed >= max_edits:
+                print(
+                    f"[LIMIT] Reached max_edits limit ({max_edits}), stopping."
+                )
+                break
 
             if args.dry_run:
                 changed += 1
