@@ -126,6 +126,11 @@ def get_login_token(
     return token
 
 
+def normalise_assert_user(bot_username: str) -> str:
+    # MediaWiki assertuser does not accept suffixes like @group or @host.
+    return bot_username.split("@", 1)[0]
+
+
 def login_with_bot_password(
     session: requests.Session,
     wiki_api: str,
@@ -457,12 +462,13 @@ def run_normalization_workflow(
         timeout=args.timeout,
         max_lag=args.maxlag,
     )
+    assert_user = normalise_assert_user(bot_username)
     csrf_token = get_csrf_token(
         session=session,
         wiki_api=wiki_api,
         timeout=args.timeout,
         max_lag=args.maxlag,
-        assert_user=bot_username,
+        assert_user=assert_user,
     )
 
     pageids = fetch_transcluded_pageids(
@@ -529,7 +535,7 @@ def process_pages(
             continue
 
         processed += 1
-        if not allowbots(content, bot_username):
+        if not allowbots(content, normalise_assert_user(bot_username)):
             skipped_bots += 1
             print(f"[SKIP][bots] pageid={pageid} title={title}")
             continue
@@ -571,7 +577,7 @@ def process_pages(
                 timeout=args.timeout,
                 max_lag=args.maxlag,
                 csrf_token=csrf_token,
-                assert_user=bot_username,
+                assert_user=normalise_assert_user(bot_username),
                 bot=use_bot_flag,
             )
             changed += 1

@@ -1,4 +1,4 @@
-name: ISBN Normalizer Bot
+name: ISBN Normaliser Bot
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ on:
 #    - cron: '30 3 * * *'
 
 jobs:
-  normalize-isbn:
+  normalise-isbn:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
@@ -26,7 +26,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Run ISBN Normalizer Bot
+      - name: Run ISBN Normaliser Bot
         env:
           BOT_USERNAME: ${{ secrets.BOT_USERNAME }}
           BOT_PASSWORD: ${{ secrets.BOT_PASSWORD }}

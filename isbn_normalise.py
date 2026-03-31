@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Normalize ISBN strings to hyphenated, human-readable form.
+"""Normalise ISBN strings to hyphenated, human-readable form.
 
 This script uses ISBN registration range rules from an ISBNRangeMessage XML file
 (such as RangeMessage.xml).
@@ -226,8 +226,8 @@ def hyphenate_isbn10(code10: str,
             if not publication:
                 continue
 
-            normalized = f"{group.group}-{registrant}-{publication}-{code10[-1]}"
-            return f"ISBN {normalized}" if with_label else normalized
+            normalised = f"{group.group}-{registrant}-{publication}-{code10[-1]}"
+            return f"ISBN {normalised}" if with_label else normalised
 
     raise ValueError(
         "Could not map ISBN-10 to a registration group/range rule.")
@@ -279,7 +279,7 @@ def normalise_isbn_templates(
         code = match.group("code")
         label = match.group("label")
 
-        # Parameter 1 must always be normalized when valid.
+        # Parameter 1 must always be normalised when valid.
         try:
             normalised_1 = normalise_token(
                 code,
@@ -293,7 +293,7 @@ def normalise_isbn_templates(
         original_code = code.strip()
         output_label = label
 
-        # Parameter 2 is normalized only when it is itself a valid ISBN token.
+        # Parameter 2 is normalised only when it is itself a valid ISBN token.
         if label is not None:
             label_stripped = label.strip()
             if label_stripped:
@@ -327,7 +327,7 @@ def normalise_isbn_templates(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Normalize ISBN-10/13 to hyphenated format "
+        description="Normalise ISBN-10/13 to hyphenated format "
         "using ISBN range XML rules.")
     parser.add_argument(help="Edit summary used when saving pages.", )
     parser.add_argument(

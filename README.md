@@ -72,7 +72,7 @@ python mw_isbn_bot.py \
 
 ## GitHub Actions 自动化
 
-在 `.github/workflows/isbn-normalizer-bot.yml` 中配置：
+在 `.github/workflows/isbn-normaliser-bot.yml` 中配置：
 
 1. **手动触发（workflow_dispatch）**
    - 可选输入 `max_edits` 来限制本次编辑数量

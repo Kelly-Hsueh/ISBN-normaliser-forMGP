@@ -1,8 +1,8 @@
 [中文](README.md) | [English](README.en.md)
 
-# ISBN Normalizer
+# ISBN Normaliser
 
-A standalone normalizer and MediaWiki bot for `{{ISBN|...}}` templates in wikitext on MoegirlPedia.
+A standalone normaliser and MediaWiki bot for `{{ISBN|...}}` templates in wikitext on MoegirlPedia.
 
 ## Core Features
 
@@ -72,7 +72,7 @@ python mw_isbn_bot.py \
 
 ## GitHub Actions Automation
 
-Configure in `.github/workflows/isbn-normalizer-bot.yml`:
+Configure in `.github/workflows/isbn-normaliser-bot.yml`:
 
 1. **Manual trigger** (workflow_dispatch)
    - Optional `max_edits` input to limit edits per run
@@ -96,7 +96,7 @@ Default values:
 
 ## Normalization Rules
 
-- Always normalize template parameter 1 (when valid)
+- Always normalise template parameter 1 (when valid)
 - Keep parameter 2 unchanged by default
 - Only drop parameter 2 when explicitly enabled and semantically identical
 - Edit summary: `根据 [https://www.iso.org/standard/65483.html ISO 2108:2017] 调整ISBN`
