@@ -335,6 +335,9 @@ def normalise_isbn_templates(
 
         # Update the template
         changed += 1
+        # Always update parameter 1 with the normalised ISBN
+        template.get("1").value = normalised_1
+
         if output_label is None:
             # Remove parameter 2 if it exists
             if template.has("2"):
