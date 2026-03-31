@@ -190,9 +190,7 @@ def allowbots(text: str, user: str) -> bool:
     pattern = (r"\{\{(nobots|bots\|"
                r"(allow=none|deny=.*?" + escaped_user + r".*?"
                r"|optout=all|deny=all))\}\}")
-    if re.search(pattern, text, flags=re.IGNORECASE):
-        return False
-    return True
+    return not re.search(pattern, text, flags=re.IGNORECASE)
 
 
 def _collect_pageids_from_transcludedin_response(
@@ -219,6 +217,35 @@ def _collect_pageids_from_transcludedin_response(
                 pageids.append(pageid)
 
 
+def _fetch_transcludedin_pageids_with_params(
+    session: requests.Session,
+    wiki_api: str,
+    params: dict[str, Any],
+    timeout: int,
+    error_context: str,
+    api_error_prefix: str,
+    pageids: list[int],
+    seen: set[int],
+) -> None:
+    while True:
+        data = api_get_json(
+            session=session,
+            wiki_api=wiki_api,
+            params=params,
+            timeout=timeout,
+            error_context=error_context,
+        )
+        if "error" in data:
+            raise RuntimeError(f"{api_error_prefix}: {data['error']}")
+
+        _collect_pageids_from_transcludedin_response(data, pageids, seen)
+
+        cont = data.get("continue")
+        if not isinstance(cont, dict):
+            break
+        params |= cont
+
+
 def fetch_transcluded_pageids(
     session: requests.Session,
     wiki_api: str,
@@ -240,26 +267,16 @@ def fetch_transcluded_pageids(
         "tiprop": "pageid",
         "tilimit": "max",
     }
-
-    while True:
-        data = api_get_json(
-            session=session,
-            wiki_api=wiki_api,
-            params=params,
-            timeout=timeout,
-            error_context="Failed to fetch transcludedin pages",
-        )
-        if "error" in data:
-            raise RuntimeError(
-                f"API error on transcludedin query: {data['error']}")
-
-        _collect_pageids_from_transcludedin_response(data, pageids, seen)
-
-        cont = data.get("continue")
-        if not isinstance(cont, dict):
-            break
-        for key, value in cont.items():
-            params[key] = value
+    _fetch_transcludedin_pageids_with_params(
+        session=session,
+        wiki_api=wiki_api,
+        params=params,
+        timeout=timeout,
+        error_context="Failed to fetch transcludedin pages",
+        api_error_prefix="API error on transcludedin query",
+        pageids=pageids,
+        seen=seen,
+    )
 
     if include_redirects:
         params = {
@@ -273,27 +290,16 @@ def fetch_transcluded_pageids(
             "tiprop": "pageid",
             "tilimit": "max",
         }
-
-        while True:
-            data = api_get_json(
-                session=session,
-                wiki_api=wiki_api,
-                params=params,
-                timeout=timeout,
-                error_context="Failed to fetch redirect transcludedin pages",
-            )
-            if "error" in data:
-                raise RuntimeError(
-                    f"API error on redirect transcludedin query: {data['error']}"
-                )
-
-            _collect_pageids_from_transcludedin_response(data, pageids, seen)
-
-            cont = data.get("continue")
-            if not isinstance(cont, dict):
-                break
-            for key, value in cont.items():
-                params[key] = value
+        _fetch_transcludedin_pageids_with_params(
+            session=session,
+            wiki_api=wiki_api,
+            params=params,
+            timeout=timeout,
+            error_context="Failed to fetch redirect transcludedin pages",
+            api_error_prefix="API error on redirect transcludedin query",
+            pageids=pageids,
+            seen=seen,
+        )
 
     return pageids
 
@@ -402,7 +408,208 @@ def edit_page_text(
     return result
 
 
+def parse_runtime_config(
+        args: argparse.Namespace) -> tuple[str, str, str, str]:
+    wiki_api = args.wiki_api or DEFAULT_WIKI_API
+    bot_username = (args.bot_username
+                    or os.environ.get("BOT_USERNAME", "")).strip()
+    bot_password = (args.bot_password
+                    or os.environ.get("BOT_PASSWORD", "")).strip()
+    user_agent = args.user_agent or DEFAULT_USER_AGENT
+
+    if not wiki_api:
+        raise RuntimeError("WIKI_API is required (flag or environment).")
+    if not bot_username:
+        raise RuntimeError("BOT_USERNAME is required (flag or environment).")
+    if not bot_password:
+        raise RuntimeError("BOT_PASSWORD is required (flag or environment).")
+
+    return wiki_api, bot_username, bot_password, user_agent
+
+
+def validate_xml_path(xml_arg: str) -> Path:
+    xml_path = Path(xml_arg)
+    if not xml_path.exists():
+        raise RuntimeError(f"XML file not found: {xml_path}")
+    return xml_path
+
+
+def run_normalization_workflow(
+    args: argparse.Namespace,
+    session: requests.Session,
+    wiki_api: str,
+    bot_username: str,
+    bot_password: str,
+    xml_path: Path,
+    include_redirects: bool,
+    use_bot_flag: bool,
+) -> int:
+    login_with_bot_password(
+        session=session,
+        wiki_api=wiki_api,
+        bot_username=bot_username,
+        bot_password=bot_password,
+        timeout=args.timeout,
+        max_lag=args.maxlag,
+    )
+    csrf_token = get_csrf_token(
+        session=session,
+        wiki_api=wiki_api,
+        timeout=args.timeout,
+        max_lag=args.maxlag,
+        assert_user=bot_username,
+    )
+
+    pageids = fetch_transcluded_pageids(
+        session=session,
+        wiki_api=wiki_api,
+        template_title=args.template_title,
+        timeout=args.timeout,
+        max_lag=args.maxlag,
+        include_redirects=include_redirects,
+    )
+    print(f"Collected pageids: {len(pageids)}")
+
+    pages_by_id = fetch_pages_content_by_pageid(
+        session=session,
+        wiki_api=wiki_api,
+        pageids=pageids,
+        timeout=args.timeout,
+        max_lag=args.maxlag,
+    )
+    print(f"Fetched pages with revisions: {len(pages_by_id)}")
+
+    processed, skipped_bots, changed, failed = process_pages(
+        args=args,
+        session=session,
+        wiki_api=wiki_api,
+        bot_username=bot_username,
+        xml_path=xml_path,
+        pageids=pageids,
+        pages_by_id=pages_by_id,
+        csrf_token=csrf_token,
+        use_bot_flag=use_bot_flag,
+    )
+
+    result_msg = (f"Done. processed={processed}, changed={changed}, "
+                  f"skipped_bots={skipped_bots}, failed={failed}")
+    print(result_msg)
+    return 0 if failed == 0 else 2
+
+
+def process_pages(
+    args: argparse.Namespace,
+    session: requests.Session,
+    wiki_api: str,
+    bot_username: str,
+    xml_path: Path,
+    pageids: list[int],
+    pages_by_id: dict[int, dict[str, Any]],
+    csrf_token: str,
+    use_bot_flag: bool,
+) -> tuple[int, int, int, int]:
+    processed = 0
+    skipped_bots = 0
+    changed = 0
+    failed = 0
+
+    for pageid in pageids:
+        page = pages_by_id.get(pageid)
+        if page is None:
+            continue
+
+        title = page.get("title", "")
+        content = extract_main_content(page)
+        if content is None:
+            continue
+
+        processed += 1
+        if not allowbots(content, bot_username):
+            skipped_bots += 1
+            print(f"[SKIP][bots] pageid={pageid} title={title}")
+            continue
+
+        new_text, replacements = normalise_isbn_templates(
+            content,
+            xml_path,
+            convert_10_to_13=args.to13,
+            drop_equal_label=args.drop_equal_label,
+        )
+        if replacements <= 0 or new_text == content:
+            continue
+
+        if args.max_edits is not None and changed >= args.max_edits:
+            print(
+                f"[LIMIT] Reached max_edits limit ({args.max_edits}), stopping."
+            )
+            break
+
+        if args.dry_run:
+            changed += 1
+            print(
+                f"[DRY-RUN][CHANGE] pageid={pageid} title={title} replacements={replacements}"
+            )
+            continue
+
+        try:
+            edit_page_text(
+                session=session,
+                wiki_api=wiki_api,
+                pageid=pageid,
+                text=new_text,
+                summary=args.summary,
+                timeout=args.timeout,
+                max_lag=args.maxlag,
+                csrf_token=csrf_token,
+                assert_user=bot_username,
+                bot=use_bot_flag,
+            )
+            changed += 1
+            print(
+                f"[EDITED] pageid={pageid} title={title} replacements={replacements}"
+            )
+            time.sleep(args.edit_interval)
+        except Exception as exc:
+            failed += 1
+            print(f"[FAILED] pageid={pageid} title={title} error={exc}",
+                  file=sys.stderr)
+
+    return processed, skipped_bots, changed, failed
+
+
+def execute(args: argparse.Namespace) -> int:
+    try:
+        load_env_file()
+
+        wiki_api, bot_username, bot_password, user_agent = parse_runtime_config(
+            args)
+        xml_path = validate_xml_path(args.xml)
+
+        include_redirects = parse_bool_env(str(args.include_redirects),
+                                           default=True)
+        use_bot_flag = parse_bool_env(str(args.bot_flag), default=True)
+
+        session = build_session(user_agent)
+        return run_normalization_workflow(
+            args=args,
+            session=session,
+            wiki_api=wiki_api,
+            bot_username=bot_username,
+            bot_password=bot_password,
+            xml_path=xml_path,
+            include_redirects=include_redirects,
+            use_bot_flag=use_bot_flag,
+        )
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+
 def main() -> int:
+    return execute(build_parser().parse_args())
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="MediaWiki runner for ISBN template normalization.")
     parser.add_argument(
@@ -487,146 +694,7 @@ def main() -> int:
         default=None,
         help="Maximum number of edits to perform. None means unlimited.",
     )
-
-    args = parser.parse_args()
-
-    try:
-        load_env_file()
-
-        wiki_api = args.wiki_api or DEFAULT_WIKI_API
-        bot_username = (args.bot_username
-                        or os.environ.get("BOT_USERNAME", "")).strip()
-        bot_password = (args.bot_password
-                        or os.environ.get("BOT_PASSWORD", "")).strip()
-        user_agent = args.user_agent or DEFAULT_USER_AGENT
-
-        if not wiki_api:
-            raise RuntimeError("WIKI_API is required (flag or environment).")
-        if not bot_username:
-            raise RuntimeError(
-                "BOT_USERNAME is required (flag or environment).")
-        if not bot_password:
-            raise RuntimeError(
-                "BOT_PASSWORD is required (flag or environment).")
-
-        xml_path = Path(args.xml)
-        if not xml_path.exists():
-            raise RuntimeError(f"XML file not found: {xml_path}")
-
-        include_redirects = parse_bool_env(str(args.include_redirects),
-                                           default=True)
-        use_bot_flag = parse_bool_env(str(args.bot_flag), default=True)
-
-        session = build_session(user_agent)
-        login_with_bot_password(
-            session=session,
-            wiki_api=wiki_api,
-            bot_username=bot_username,
-            bot_password=bot_password,
-            timeout=args.timeout,
-            max_lag=args.maxlag,
-        )
-        csrf_token = get_csrf_token(
-            session=session,
-            wiki_api=wiki_api,
-            timeout=args.timeout,
-            max_lag=args.maxlag,
-            assert_user=bot_username,
-        )
-
-        pageids = fetch_transcluded_pageids(
-            session=session,
-            wiki_api=wiki_api,
-            template_title=args.template_title,
-            timeout=args.timeout,
-            max_lag=args.maxlag,
-            include_redirects=include_redirects,
-        )
-        print(f"Collected pageids: {len(pageids)}")
-
-        pages_by_id = fetch_pages_content_by_pageid(
-            session=session,
-            wiki_api=wiki_api,
-            pageids=pageids,
-            timeout=args.timeout,
-            max_lag=args.maxlag,
-        )
-        print(f"Fetched pages with revisions: {len(pages_by_id)}")
-
-        processed = 0
-        skipped_bots = 0
-        changed = 0
-        failed = 0
-        max_edits = args.max_edits
-
-        for pageid in pageids:
-            page = pages_by_id.get(pageid)
-            if page is None:
-                continue
-
-            title = page.get("title", "")
-            content = extract_main_content(page)
-            if content is None:
-                continue
-
-            processed += 1
-            if not allowbots(content, bot_username):
-                skipped_bots += 1
-                print(f"[SKIP][bots] pageid={pageid} title={title}")
-                continue
-
-            new_text, replacements = normalise_isbn_templates(
-                content,
-                xml_path,
-                convert_10_to_13=args.to13,
-                drop_equal_label=args.drop_equal_label,
-            )
-            if replacements <= 0 or new_text == content:
-                continue
-
-            if max_edits is not None and changed >= max_edits:
-                print(
-                    f"[LIMIT] Reached max_edits limit ({max_edits}), stopping."
-                )
-                break
-
-            if args.dry_run:
-                changed += 1
-                print(
-                    f"[DRY-RUN][CHANGE] pageid={pageid} title={title} replacements={replacements}"
-                )
-                continue
-
-            try:
-                edit_page_text(
-                    session=session,
-                    wiki_api=wiki_api,
-                    pageid=pageid,
-                    text=new_text,
-                    summary=args.summary,
-                    timeout=args.timeout,
-                    max_lag=args.maxlag,
-                    csrf_token=csrf_token,
-                    assert_user=bot_username,
-                    bot=use_bot_flag,
-                )
-                changed += 1
-                print(
-                    f"[EDITED] pageid={pageid} title={title} replacements={replacements}"
-                )
-                time.sleep(args.edit_interval)
-            except Exception as exc:
-                failed += 1
-                print(f"[FAILED] pageid={pageid} title={title} error={exc}",
-                      file=sys.stderr)
-
-        result_msg = (f"Done. processed={processed}, changed={changed}, "
-                      f"skipped_bots={skipped_bots}, failed={failed}")
-        print(result_msg)
-        return 0 if failed == 0 else 2
-    except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
+    return parser
 
 
 if __name__ == "__main__":
