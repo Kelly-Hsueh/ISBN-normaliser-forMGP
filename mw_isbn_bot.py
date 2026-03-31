@@ -579,6 +579,7 @@ def process_pages(
                 csrf_token=csrf_token,
                 assert_user=normalise_assert_user(bot_username),
                 bot=use_bot_flag,
+                tags="Bot",
             )
             changed += 1
             print(
