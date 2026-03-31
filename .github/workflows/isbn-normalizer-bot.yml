@@ -7,8 +7,8 @@ on:
         description: 'Maximum number of edits to perform (optional, leave empty for unlimited)'
         required: false
         default: ''
-  schedule:
-    - cron: '30 3 * * *'
+#  schedule:
+#    - cron: '30 3 * * *'
 
 jobs:
   normalize-isbn:
