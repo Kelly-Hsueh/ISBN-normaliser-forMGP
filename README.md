@@ -28,14 +28,23 @@
 **单文件格式化：**
 ```bash
 python isbn_normalise.py \
+  --xml RangeMessage.xml \
   --text-file your_wikitext.txt \
   -format \
   --in-place
 ```
 
+**单个 ISBN 规范化：**
+```bash
+python isbn_normalise.py \
+  --xml RangeMessage.xml \
+  9787302511625
+```
+
 **转换 + 转换为 ISBN-13：**
 ```bash
 python isbn_normalise.py \
+  --xml RangeMessage.xml \
   --text-file your_wikitext.txt \
   -format -to13 \
   --in-place
@@ -44,6 +53,7 @@ python isbn_normalise.py \
 **转换 + 删除相同的标签：**
 ```bash
 python isbn_normalise.py \
+  --xml RangeMessage.xml \
   --text-file your_wikitext.txt \
   -format \
   --drop-equal-label \

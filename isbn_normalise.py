@@ -15,8 +15,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import mwparserfromhell.parser
-
 
 @dataclass(frozen=True)
 class Rule:
@@ -330,6 +328,7 @@ def normalise_isbn_templates(
         xml_path: Path,
         convert_10_to_13: bool = False,
         drop_equal_label: bool = False) -> tuple[str, int]:
+    import mwparserfromhell.parser
     groups = load_groups(xml_path)
     changed = 0
 
