@@ -13,6 +13,8 @@ import sys
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+
 import mwparserfromhell.parser
 
 
@@ -262,6 +264,67 @@ def normalise(raw_isbn: str,
     )
 
 
+def try_normalise_template_value(
+    raw_value: str,
+    groups: list[Group],
+    convert_10_to_13: bool,
+) -> str | None:
+    try:
+        return normalise_token(
+            raw_value,
+            groups,
+            convert_10_to_13=convert_10_to_13,
+            with_label=False,
+        )
+    except ValueError:
+        return None
+
+
+def get_template_label_value(
+    template: Any,
+    groups: list[Group],
+    convert_10_to_13: bool,
+) -> str | None:
+    if not template.has("2"):
+        return None
+
+    label_str = str(template.get("2").value).strip()
+    if not label_str:
+        return None
+
+    normalised = try_normalise_template_value(
+        label_str,
+        groups,
+        convert_10_to_13,
+    )
+    return normalised if normalised is not None else label_str
+
+
+def should_drop_equal_label(
+    code_str: str,
+    output_label: str | None,
+    drop_equal_label: bool,
+) -> bool:
+    if not drop_equal_label or output_label is None:
+        return False
+
+    key1 = isbn_equivalence_key(code_str)
+    key2 = isbn_equivalence_key(output_label)
+    return key1 is not None and key1 == key2
+
+
+def update_template_label(template: Any, output_label: str | None) -> None:
+    if output_label is None:
+        if template.has("2"):
+            template.remove("2")
+        return
+
+    if template.has("2"):
+        template.get("2").value = output_label
+    else:
+        template.add("2", output_label)
+
+
 def normalise_isbn_templates(
         text: str,
         xml_path: Path,
@@ -278,7 +341,7 @@ def normalise_isbn_templates(
         code.filter_templates(
             matches=lambda t: str(t.name).strip().lower() == "isbn"))
 
-    for idx, template in enumerate(templates_found, 1):
+    for template in templates_found:
         # Normalise template name to standard "ISBN" casing
         template.name = "ISBN"
 
@@ -289,40 +352,24 @@ def normalise_isbn_templates(
         param1 = template.get("1")
         code_str = str(param1.value).strip()
 
-        # Try to normalise parameter 1
-        try:
-            normalised_1 = normalise_token(
-                code_str,
-                groups,
-                convert_10_to_13=convert_10_to_13,
-                with_label=False,
-            )
-        except ValueError:
+        normalised_1 = try_normalise_template_value(
+            code_str,
+            groups,
+            convert_10_to_13,
+        )
+        if normalised_1 is None:
             # If param 1 is not a valid ISBN, skip this template
             continue
 
-        # Get parameter 2 (the label) if it exists
-        output_label = None
-        if template.has("2"):
-            param2 = template.get("2")
-            if label_str := str(param2.value).strip():
-                try:
-                    output_label = normalise_token(
-                        label_str,
-                        groups,
-                        convert_10_to_13=convert_10_to_13,
-                        with_label=False,
-                    )
-                except ValueError:
-                    # If label is not a valid ISBN, keep it as-is
-                    output_label = label_str
+        output_label = get_template_label_value(
+            template,
+            groups,
+            convert_10_to_13,
+        )
 
         # Optionally drop param2 when it is semantically the same ISBN
-        if output_label is not None:
-            key1 = isbn_equivalence_key(code_str)
-            key2 = isbn_equivalence_key(output_label)
-            if drop_equal_label and key1 is not None and key1 == key2:
-                output_label = None
+        if should_drop_equal_label(code_str, output_label, drop_equal_label):
+            output_label = None
 
         # Check if anything changed
         original_code = code_str
@@ -337,15 +384,7 @@ def normalise_isbn_templates(
         changed += 1
         # Always update parameter 1 with the normalised ISBN
         template.get("1").value = normalised_1
-
-        if output_label is None:
-            # Remove parameter 2 if it exists
-            if template.has("2"):
-                template.remove("2")
-        elif template.has("2"):
-            template.get("2").value = output_label
-        else:
-            template.add("2", output_label)
+        update_template_label(template, output_label)
 
     return str(code), changed
 

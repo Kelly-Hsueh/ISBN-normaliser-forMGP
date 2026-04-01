@@ -386,6 +386,38 @@ def extract_main_content(page: dict[str, Any]) -> str | None:
     return content if isinstance(content, str) else None
 
 
+def extract_baserevid(page: dict[str, Any]) -> str:
+    revisions = page.get("revisions")
+    if not isinstance(revisions, list) or not revisions:
+        return ""
+
+    rev0 = revisions[0]
+    if not isinstance(rev0, dict):
+        return ""
+
+    revid = rev0.get("revid")
+    return str(revid) if revid is not None else ""
+
+
+def get_skip_reason(content: str, assert_user: str) -> str | None:
+    if not allowbots(content, assert_user):
+        return "bots"
+    return "inuse" if is_underconstruction(content) else None
+
+
+def normalise_page_isbn_templates(
+    content: str,
+    args: argparse.Namespace,
+    xml_path: Path,
+) -> tuple[str, int]:
+    return normalise_isbn_templates(
+        content,
+        xml_path,
+        convert_10_to_13=args.to13,
+        drop_equal_label=args.drop_equal_label,
+    )
+
+
 def edit_page_text(
     session: requests.Session,
     wiki_api: str,
@@ -542,7 +574,7 @@ def process_pages(
     skipped_bots = 0
     changed = 0
     failed = 0
-    skipped_conflicts = 0
+    assert_user = normalise_assert_user(bot_username)
 
     for pageid in pageids:
         page = pages_by_id.get(pageid)
@@ -554,28 +586,19 @@ def process_pages(
         if content is None:
             continue
 
-        # 提取页面的基础修订的 ID
-        baserevid = ""
-        revisions = page.get("revisions")
-        if isinstance(revisions, list) and revisions:
-            baserevid = revisions[0].get("revid", "")
+        baserevid = extract_baserevid(page)
 
         processed += 1
-        if not allowbots(content, normalise_assert_user(bot_username)):
+        skip_reason = get_skip_reason(content, assert_user)
+        if skip_reason is not None:
             skipped_bots += 1
-            print(f"[SKIP][bots] pageid={pageid} title={title}")
+            print(f"[SKIP][{skip_reason}] pageid={pageid} title={title}")
             continue
 
-        if is_underconstruction(content):
-            skipped_bots += 1
-            print(f"[SKIP][inuse] pageid={pageid} title={title}")
-            continue
-
-        new_text, replacements = normalise_isbn_templates(
+        new_text, replacements = normalise_page_isbn_templates(
             content,
+            args,
             xml_path,
-            convert_10_to_13=args.to13,
-            drop_equal_label=args.drop_equal_label,
         )
         if replacements <= 0 or new_text == content:
             continue
@@ -603,7 +626,7 @@ def process_pages(
                 timeout=args.timeout,
                 max_lag=args.maxlag,
                 csrf_token=csrf_token,
-                assert_user=normalise_assert_user(bot_username),
+                assert_user=assert_user,
                 bot=use_bot_flag,
                 baserevid=baserevid,
                 starttimestamp=start_timestamp,
@@ -616,7 +639,6 @@ def process_pages(
         except RuntimeError as exc:
             error_msg = str(exc)
             if "editconflict" in error_msg:
-                skipped_conflicts += 1
                 print(f"[SKIP][conflict] pageid={pageid} title={title}")
             else:
                 failed += 1
