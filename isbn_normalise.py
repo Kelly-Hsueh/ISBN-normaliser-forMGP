@@ -188,7 +188,7 @@ def hyphenate_isbn13(digits13: str,
                 continue
 
             normalised = f"{group.gs1}-{group.group}-{registrant}-{publication}-{check_digit}"
-            return f"ISBN {normalised}" if with_label else normalised
+            return f"{normalised}" if with_label else normalised
 
     raise ValueError("Could not map ISBN to a registration group/range rule.")
 
@@ -393,39 +393,45 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Normalise ISBN-10/13 to hyphenated format "
         "using ISBN range XML rules.")
-    parser.add_argument(help="Edit summary used when saving pages.", )
     parser.add_argument(
-        "--maxlag",
-        type=int,
-        default=3,
-        help="MediaWiki maxlag value.",
+        "isbn",
+        nargs="?",
+        help="Single ISBN input (valid ISBN-10 or ISBN-13).",
     )
     parser.add_argument(
-        "--timeout",
-        type=int,
-        default=30,
-        help="HTTP timeout (seconds).",
+        "--xml",
+        default="RangeMessage.xml",
+        help="Path to ISBN range XML file.",
     )
     parser.add_argument(
-        "--edit-interval",
-        type=float,
-        default=0.2,
-        help="Seconds to sleep between successful edits.",
+        "--text-file",
+        help="Path to wikitext file to rewrite ISBN templates.",
     )
     parser.add_argument(
-        "--include-redirects",
-        default="true",
-        help="Whether to query generator=redirects transclusions (true/false).",
-    )
-    parser.add_argument(
-        "--bot-flag",
-        default="true",
-        help="Whether to submit edit with bot=1 (true/false).",
-    )
-    parser.add_argument(
-        "--dry-run",
+        "--in-place",
         action="store_true",
-        help="Run full workflow but do not save edits.",
+        help="Write output back to --text-file instead of printing.",
+    )
+    parser.add_argument(
+        "-to13",
+        "--to13",
+        action="store_true",
+        help="Convert ISBN-10 to ISBN-13 before output.",
+    )
+    parser.add_argument(
+        "--drop-equal-label",
+        action="store_true",
+        help="Drop template parameter 2 if it is semantically same ISBN.",
+    )
+    parser.add_argument(
+        "--no-label",
+        action="store_true",
+        help="Do not prefix single-ISBN output with 'ISBN '.",
+    )
+    parser.add_argument(
+        "-format",
+        action="store_true",
+        help="Compatibility flag; formatting is always enabled.",
     )
 
     args = parser.parse_args()
