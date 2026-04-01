@@ -225,7 +225,7 @@ def hyphenate_isbn10(code10: str,
                 continue
 
             normalised = f"{group.group}-{registrant}-{publication}-{code10[-1]}"
-            return f"ISBN {normalised}" if with_label else normalised
+            return f"{normalised}" if with_label else normalised
 
     raise ValueError(
         "Could not map ISBN-10 to a registration group/range rule.")
