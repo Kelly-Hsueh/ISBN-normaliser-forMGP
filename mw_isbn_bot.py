@@ -324,8 +324,9 @@ def fetch_pages_content_by_pageid(
     pageids: list[int],
     timeout: int,
     max_lag: int,
-) -> dict[int, dict[str, Any]]:
+) -> tuple[dict[int, dict[str, Any]], str]:
     results: dict[int, dict[str, Any]] = {}
+    curtimestamp: str = ""
 
     for batch in chunked(pageids, 50):
         params: dict[str, Any] = {
@@ -335,8 +336,9 @@ def fetch_pages_content_by_pageid(
             "prop": "revisions",
             "pageids": "|".join(str(pid) for pid in batch),
             "formatversion": 2,
-            "rvprop": "content",
+            "rvprop": "content|ids",
             "rvslots": "main",
+            "curtimestamp": 1,
         }
         data = api_get_json(
             session=session,
@@ -349,6 +351,10 @@ def fetch_pages_content_by_pageid(
             raise RuntimeError(
                 f"API error on revisions query: {data['error']}")
 
+        if not curtimestamp:
+            curtimestamp = data.get("batchcomplete") and data.get(
+                "curtimestamp", "") or ""
+
         pages = data.get("query", {}).get("pages", [])
         if isinstance(pages, list):
             for page in pages:
@@ -356,7 +362,7 @@ def fetch_pages_content_by_pageid(
                         page.get("pageid"), int):
                     results[page["pageid"]] = page
 
-    return results
+    return results, curtimestamp
 
 
 def extract_main_content(page: dict[str, Any]) -> str | None:
@@ -391,6 +397,8 @@ def edit_page_text(
     csrf_token: str,
     assert_user: str,
     bot: bool,
+    baserevid: str = "",
+    starttimestamp: str = "",
 ) -> dict[str, Any]:
     data: dict[str, Any] = {
         "action": "edit",
@@ -405,6 +413,10 @@ def edit_page_text(
     }
     if bot:
         data["bot"] = "1"
+    if baserevid:
+        data["baserevid"] = baserevid
+    if starttimestamp:
+        data["starttimestamp"] = starttimestamp
 
     result = api_post_json(
         session=session,
@@ -414,6 +426,10 @@ def edit_page_text(
         error_context=f"Failed to edit pageid={pageid}",
     )
     if "error" in result:
+        error_code = result.get("error", {}).get("code", "")
+        if error_code == "editconflict":
+            raise RuntimeError(
+                f"[editconflict] pageid={pageid}: {result['error']}")
         raise RuntimeError(
             f"API edit error for pageid={pageid}: {result['error']}")
     return result
@@ -482,7 +498,7 @@ def run_normalization_workflow(
     )
     print(f"Collected pageids: {len(pageids)}")
 
-    pages_by_id = fetch_pages_content_by_pageid(
+    pages_by_id, curtimestamp = fetch_pages_content_by_pageid(
         session=session,
         wiki_api=wiki_api,
         pageids=pageids,
@@ -501,6 +517,7 @@ def run_normalization_workflow(
         pages_by_id=pages_by_id,
         csrf_token=csrf_token,
         use_bot_flag=use_bot_flag,
+        start_timestamp=curtimestamp,
     )
 
     result_msg = (f"Done. processed={processed}, changed={changed}, "
@@ -519,11 +536,13 @@ def process_pages(
     pages_by_id: dict[int, dict[str, Any]],
     csrf_token: str,
     use_bot_flag: bool,
+    start_timestamp: str = "",
 ) -> tuple[int, int, int, int]:
     processed = 0
     skipped_bots = 0
     changed = 0
     failed = 0
+    skipped_conflicts = 0
 
     for pageid in pageids:
         page = pages_by_id.get(pageid)
@@ -534,6 +553,12 @@ def process_pages(
         content = extract_main_content(page)
         if content is None:
             continue
+
+        # 提取页面的基础修订的 ID
+        baserevid = ""
+        revisions = page.get("revisions")
+        if isinstance(revisions, list) and revisions:
+            baserevid = revisions[0].get("revid", "")
 
         processed += 1
         if not allowbots(content, normalise_assert_user(bot_username)):
@@ -580,12 +605,23 @@ def process_pages(
                 csrf_token=csrf_token,
                 assert_user=normalise_assert_user(bot_username),
                 bot=use_bot_flag,
+                baserevid=baserevid,
+                starttimestamp=start_timestamp,
             )
             changed += 1
             print(
                 f"[EDITED] pageid={pageid} title={title} replacements={replacements}"
             )
             time.sleep(args.edit_interval)
+        except RuntimeError as exc:
+            error_msg = str(exc)
+            if "editconflict" in error_msg:
+                skipped_conflicts += 1
+                print(f"[SKIP][conflict] pageid={pageid} title={title}")
+            else:
+                failed += 1
+                print(f"[FAILED] pageid={pageid} title={title} error={exc}",
+                      file=sys.stderr)
         except Exception as exc:
             failed += 1
             print(f"[FAILED] pageid={pageid} title={title} error={exc}",
