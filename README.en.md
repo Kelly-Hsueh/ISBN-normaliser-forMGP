@@ -1,3 +1,5 @@
+[![Update Range File](https://github.com/Kelly-Hsueh/ISBN-normaliser-forMGP/actions/workflows/update-rangemessage.yml/badge.svg?event=schedule)](https://github.com/Kelly-Hsueh/ISBN-normaliser-forMGP/actions/workflows/update-rangemessage.yml)
+
 [中文](README.md) | [English](README.en.md)
 
 # ISBN Normaliser
@@ -24,7 +26,7 @@ A standalone normalisation tool and MediaWiki bot for the {{[ISBN](https://mzh.m
 ## Environment And Packages
 
 - Python 3.10+ (3.11 recommended, consistent with GitHub Actions)
-- Third-party packages:
+- Third-party packages (not required if only processing one single ISBN, not wikitext):
   - `requests`
   - `brotli`
   - `mwparserfromhell`

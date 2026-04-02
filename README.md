@@ -1,3 +1,5 @@
+[![Update Range File](https://github.com/Kelly-Hsueh/ISBN-normaliser-forMGP/actions/workflows/update-rangemessage.yml/badge.svg?event=schedule)](https://github.com/Kelly-Hsueh/ISBN-normaliser-forMGP/actions/workflows/update-rangemessage.yml)
+
 [中文](README.md) | [English](README.en.md)
 
 # ISBN 规范化器
@@ -24,7 +26,7 @@
 ## 环境与依赖
 
 - Python 3.10+（推荐 3.11，与 GitHub Actions 一致）
-- 第三方依赖：
+- 第三方依赖（若只需处理单个 ISBN 而非 wikitext 则不需要）：
   - `requests`
   - `brotli`
   - `mwparserfromhell`
