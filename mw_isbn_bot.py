@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import json
 import os
 import re
 import sys
@@ -10,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
+import brotli
 
 from isbn_normalise import normalise_isbn_templates
 
@@ -65,6 +68,25 @@ def safe_get_json(response: requests.Response) -> dict[str, Any]:
     return data
 
 
+def parse_response_json(response: requests.Response) -> dict[str, Any]:
+    # 1) Normal path: requests handles JSON (and often compression) for us.
+    with contextlib.suppress(RuntimeError):
+        return safe_get_json(response)
+
+    # 2) Fallback: some endpoints may return brotli bytes without reliable headers.
+    with contextlib.suppress(brotli.error, UnicodeDecodeError,
+                             json.JSONDecodeError):
+        decoded = brotli.decompress(response.content).decode("utf-8")
+        data = json.loads(decoded)
+        if isinstance(data, dict):
+            return data
+
+    preview = response.text[:160].replace("\n", " ")
+    raise RuntimeError(
+        f"API returned non-JSON response, HTTP {response.status_code}, body={preview!r}"
+    )
+
+
 def build_session(user_agent: str) -> requests.Session:
     session = requests.Session()
     session.headers.update({"User-Agent": user_agent})
@@ -81,7 +103,7 @@ def api_get_json(
     try:
         response = session.get(wiki_api, params=params, timeout=timeout)
         response.raise_for_status()
-        return safe_get_json(response)
+        return parse_response_json(response)
     except Exception as exc:
         raise RuntimeError(f"{error_context}: {exc}") from exc
 
@@ -96,7 +118,7 @@ def api_post_json(
     try:
         response = session.post(wiki_api, data=data, timeout=timeout)
         response.raise_for_status()
-        return safe_get_json(response)
+        return parse_response_json(response)
     except Exception as exc:
         raise RuntimeError(f"{error_context}: {exc}") from exc
 
@@ -230,30 +252,32 @@ def _collect_pageids_from_transcludedin_response(
 def _fetch_transcludedin_pageids_with_params(
     session: requests.Session,
     wiki_api: str,
-    params: dict[str, Any],
+    data: dict[str, Any],
     timeout: int,
     error_context: str,
     api_error_prefix: str,
     pageids: list[int],
     seen: set[int],
 ) -> None:
+    request_data = dict(data)
     while True:
-        data = api_get_json(
+        response_data = api_post_json(
             session=session,
             wiki_api=wiki_api,
-            params=params,
+            data=request_data,
             timeout=timeout,
             error_context=error_context,
         )
-        if "error" in data:
-            raise RuntimeError(f"{api_error_prefix}: {data['error']}")
+        if "error" in response_data:
+            raise RuntimeError(f"{api_error_prefix}: {response_data['error']}")
 
-        _collect_pageids_from_transcludedin_response(data, pageids, seen)
+        _collect_pageids_from_transcludedin_response(response_data, pageids,
+                                                     seen)
 
-        cont = data.get("continue")
+        cont = response_data.get("continue")
         if not isinstance(cont, dict):
             break
-        params |= cont
+        request_data |= cont
 
 
 def fetch_transcluded_pageids(
@@ -267,7 +291,7 @@ def fetch_transcluded_pageids(
     pageids: list[int] = []
     seen: set[int] = set()
 
-    params: dict[str, Any] = {
+    data: dict[str, Any] = {
         "action": "query",
         "format": "json",
         "maxlag": max_lag,
@@ -280,7 +304,7 @@ def fetch_transcluded_pageids(
     _fetch_transcludedin_pageids_with_params(
         session=session,
         wiki_api=wiki_api,
-        params=params,
+        data=data,
         timeout=timeout,
         error_context="Failed to fetch transcludedin pages",
         api_error_prefix="API error on transcludedin query",
@@ -289,7 +313,7 @@ def fetch_transcluded_pageids(
     )
 
     if include_redirects:
-        params = {
+        data = {
             "action": "query",
             "format": "json",
             "maxlag": max_lag,
@@ -303,7 +327,7 @@ def fetch_transcluded_pageids(
         _fetch_transcludedin_pageids_with_params(
             session=session,
             wiki_api=wiki_api,
-            params=params,
+            data=data,
             timeout=timeout,
             error_context="Failed to fetch redirect transcludedin pages",
             api_error_prefix="API error on redirect transcludedin query",
@@ -329,7 +353,7 @@ def fetch_pages_content_by_pageid(
     curtimestamp: str = ""
 
     for batch in chunked(pageids, 50):
-        params: dict[str, Any] = {
+        data: dict[str, Any] = {
             "action": "query",
             "format": "json",
             "maxlag": max_lag,
@@ -340,10 +364,10 @@ def fetch_pages_content_by_pageid(
             "rvslots": "main",
             "curtimestamp": 1,
         }
-        data = api_get_json(
+        data = api_post_json(
             session=session,
             wiki_api=wiki_api,
-            params=params,
+            data=data,
             timeout=timeout,
             error_context="Failed to fetch page revisions",
         )
@@ -637,8 +661,7 @@ def process_pages(
             )
             time.sleep(args.edit_interval)
         except RuntimeError as exc:
-            error_msg = str(exc)
-            if "editconflict" in error_msg:
+            if "editconflict" in str(exc):
                 print(f"[SKIP][conflict] pageid={pageid} title={title}")
             else:
                 failed += 1
