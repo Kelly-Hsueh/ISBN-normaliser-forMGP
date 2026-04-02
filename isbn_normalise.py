@@ -298,12 +298,11 @@ def get_template_label_value(
     return normalised if normalised is not None else label_str
 
 
-def should_drop_equal_label(
+def are_semantically_equal_isbns(
     code_str: str,
     output_label: str | None,
-    drop_equal_label: bool,
 ) -> bool:
-    if not drop_equal_label or output_label is None:
+    if output_label is None:
         return False
 
     key1 = isbn_equivalence_key(code_str)
@@ -327,7 +326,7 @@ def normalise_isbn_templates(
         text: str,
         xml_path: Path,
         convert_10_to_13: bool = False,
-        drop_equal_label: bool = False) -> tuple[str, int]:
+        rehyphenate_equal_label: bool = False) -> tuple[str, int]:
     import mwparserfromhell.parser
     groups = load_groups(xml_path)
     changed = 0
@@ -366,23 +365,26 @@ def normalise_isbn_templates(
             convert_10_to_13,
         )
 
-        # Optionally drop param2 when it is semantically the same ISBN
-        if should_drop_equal_label(code_str, output_label, drop_equal_label):
-            output_label = None
+        equal_isbn = are_semantically_equal_isbns(code_str, output_label)
+        output_code = normalised_1
+        if rehyphenate_equal_label and equal_isbn:
+            # For semantically equal params, keep a plain value in param1 and
+            # a hyphenated value in param2.
+            output_code = normalised_1.replace("-", "")
 
         # Check if anything changed
         original_code = code_str
         original_label = str(
             template.get("2").value).strip() if template.has("2") else None
 
-        if normalised_1 == original_code and output_label == original_label:
+        if output_code == original_code and output_label == original_label:
             # No changes needed
             continue
 
         # Update the template
         changed += 1
         # Always update parameter 1 with the normalised ISBN
-        template.get("1").value = normalised_1
+        template.get("1").value = output_code
         update_template_label(template, output_label)
 
     return str(code), changed
@@ -418,9 +420,12 @@ def main() -> int:
         help="Convert ISBN-10 to ISBN-13 before output.",
     )
     parser.add_argument(
-        "--drop-equal-label",
+        "--rehyphenate-equal-label",
         action="store_true",
-        help="Drop template parameter 2 if it is semantically same ISBN.",
+        help=(
+            "When template parameter 1 and 2 are semantically the same ISBN, "
+            "set parameter 1 to non-hyphenated form and keep parameter 2 "
+            "hyphenated."),
     )
     parser.add_argument(
         "--no-label",
@@ -444,7 +449,7 @@ def main() -> int:
                 input_text,
                 xml_path,
                 convert_10_to_13=args.to13,
-                drop_equal_label=args.drop_equal_label,
+                rehyphenate_equal_label=args.rehyphenate_equal_label,
             )
         except Exception as exc:
             print(f"Error: {exc}", file=sys.stderr)

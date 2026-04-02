@@ -9,7 +9,7 @@
 - **isbn_normalise.py** — 纯 ISBN 规范化库
   - 按国际标准书号规则对 ISBN-10/13 进行连字符规范化
   - 可选：将 ISBN-10 转换为 ISBN-13
-  - 可选：删除语义相同的第二参数
+  - 可选：当参数1和参数2语义相同时，将参数1改为无连字符并将参数2连字符化
 
 - **mw_isbn_bot.py** — MediaWiki 机器人运行时
   - 自动获取嵌入 Template:ISBN 和其重定向的页面
@@ -76,13 +76,13 @@ python isbn_normalise.py \
   --in-place
 ```
 
-**转换 + 删除相同的标签：**
+**转换 + 相同语义参数重排：**
 ```bash
 python isbn_normalise.py \
   --xml RangeMessage.xml \
   --text-file your_wikitext.txt \
   -format \
-  --drop-equal-label \
+  --rehyphenate-equal-label \
   --in-place
 ```
 
@@ -176,7 +176,7 @@ BOT_PASSWORD=YourBotPassword
 
 - 始终规范化模板第 1 参数（当有效时）
 - 默认保持第 2 参数不变
-- 仅在显式启用且语义相同时删除第 2 参数
+- 仅在显式启用且语义相同时：将第 1 参数改为无连字符，将第 2 参数规范化为连字符格式
 - 编辑摘要：`根据 ISO 2108:2017（https://www.iso.org/standard/65483.html ）自动调整ISBN（若阁下对此次修改感到疑惑，可以前往 https://grp.isbn-international.org/ 查找出版社前缀信息）`
 
 ## 故障排查

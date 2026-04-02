@@ -438,7 +438,7 @@ def normalise_page_isbn_templates(
         content,
         xml_path,
         convert_10_to_13=args.to13,
-        drop_equal_label=args.drop_equal_label,
+        rehyphenate_equal_label=args.rehyphenate_equal_label,
     )
 
 
@@ -759,9 +759,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Convert ISBN-10 template values to ISBN-13 before output.",
     )
     parser.add_argument(
-        "--drop-equal-label",
+        "--rehyphenate-equal-label",
         action="store_true",
-        help="When template param2 is the same ISBN as param1, remove param2.",
+        help=(
+            "When template param1 and param2 are semantically the same ISBN, "
+            "set param1 to non-hyphenated form and keep param2 hyphenated."),
     )
     parser.add_argument(
         "--wiki-api",
