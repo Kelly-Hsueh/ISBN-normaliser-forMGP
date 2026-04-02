@@ -582,6 +582,63 @@ def run_normalization_workflow(
     return 0 if failed == 0 else 2
 
 
+def _try_apply_changes(
+    session: requests.Session,
+    wiki_api: str,
+    pageid: int,
+    title: str,
+    new_text: str,
+    replacements: int,
+    args: argparse.Namespace,
+    csrf_token: str,
+    assert_user: str,
+    use_bot_flag: bool,
+    baserevid: str,
+    start_timestamp: str,
+) -> tuple[bool, bool]:
+    """Apply changes to page (dry-run or real edit).
+
+    Returns: (changed_count_incremented, should_fail)
+    """
+    if args.dry_run:
+        print(
+            f"[DRY-RUN][CHANGE] pageid={pageid} title={title} replacements={replacements}"
+        )
+        return True, False
+
+    try:
+        edit_page_text(
+            session=session,
+            wiki_api=wiki_api,
+            pageid=pageid,
+            text=new_text,
+            summary=args.summary,
+            timeout=args.timeout,
+            max_lag=args.maxlag,
+            csrf_token=csrf_token,
+            assert_user=assert_user,
+            bot=use_bot_flag,
+            baserevid=baserevid,
+            starttimestamp=start_timestamp,
+        )
+        print(
+            f"[EDITED] pageid={pageid} title={title} replacements={replacements}"
+        )
+        time.sleep(args.edit_interval)
+        return True, False
+    except RuntimeError as exc:
+        if "editconflict" not in str(exc):
+            print(f"[FAILED] pageid={pageid} title={title} error={exc}",
+                  file=sys.stderr)
+            return False, True
+        print(f"[SKIP][conflict] pageid={pageid} title={title}")
+        return False, False
+    except Exception as exc:
+        print(f"[FAILED] pageid={pageid} title={title} error={exc}",
+              file=sys.stderr)
+        return False, True
+
+
 def process_pages(
     args: argparse.Namespace,
     session: requests.Session,
@@ -611,8 +668,8 @@ def process_pages(
             continue
 
         baserevid = extract_baserevid(page)
-
         processed += 1
+
         skip_reason = get_skip_reason(content, assert_user)
         if skip_reason is not None:
             skipped_bots += 1
@@ -633,44 +690,24 @@ def process_pages(
             )
             break
 
-        if args.dry_run:
+        changed_flag, failed_flag = _try_apply_changes(
+            session=session,
+            wiki_api=wiki_api,
+            pageid=pageid,
+            title=title,
+            new_text=new_text,
+            replacements=replacements,
+            args=args,
+            csrf_token=csrf_token,
+            assert_user=assert_user,
+            use_bot_flag=use_bot_flag,
+            baserevid=baserevid,
+            start_timestamp=start_timestamp,
+        )
+        if changed_flag:
             changed += 1
-            print(
-                f"[DRY-RUN][CHANGE] pageid={pageid} title={title} replacements={replacements}"
-            )
-            continue
-
-        try:
-            edit_page_text(
-                session=session,
-                wiki_api=wiki_api,
-                pageid=pageid,
-                text=new_text,
-                summary=args.summary,
-                timeout=args.timeout,
-                max_lag=args.maxlag,
-                csrf_token=csrf_token,
-                assert_user=assert_user,
-                bot=use_bot_flag,
-                baserevid=baserevid,
-                starttimestamp=start_timestamp,
-            )
-            changed += 1
-            print(
-                f"[EDITED] pageid={pageid} title={title} replacements={replacements}"
-            )
-            time.sleep(args.edit_interval)
-        except RuntimeError as exc:
-            if "editconflict" in str(exc):
-                print(f"[SKIP][conflict] pageid={pageid} title={title}")
-            else:
-                failed += 1
-                print(f"[FAILED] pageid={pageid} title={title} error={exc}",
-                      file=sys.stderr)
-        except Exception as exc:
+        if failed_flag:
             failed += 1
-            print(f"[FAILED] pageid={pageid} title={title} error={exc}",
-                  file=sys.stderr)
 
     return processed, skipped_bots, changed, failed
 
