@@ -783,7 +783,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--template-title",
-        default="Template:ISBN",
+        default="Template:ISBN|Template:Cite book",
         help="Template title for transclusion lookup.",
     )
     parser.add_argument(

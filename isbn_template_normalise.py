@@ -12,6 +12,9 @@ import mwparserfromhell
 
 from isbn_normalise import Group, isbn_equivalence_key, load_groups, normalise_token
 
+SPECIAL_NAMESPACE_ALIASES = frozenset({"special", "特殊"})
+BOOKSOURCE_PAGE_ALIASES = frozenset({"网络书源", "網絡書源", "booksources"})
+
 
 def try_normalise_template_value(
     raw_value: str,
@@ -73,6 +76,189 @@ def update_template_label(template: Any, output_label: str | None) -> None:
         template.add("2", output_label)
 
 
+def extract_booksource_isbn_from_title(title: Any) -> str | None:
+    title_str = str(title).strip()
+    if not title_str:
+        return None
+
+    # Allow links like [[:Special:网络书源/...]] and normalize for matching.
+    if title_str.startswith(":"):
+        title_str = title_str[1:].strip()
+
+    if "/" not in title_str:
+        return None
+
+    prefix_text, suffix_text = title_str.split("/", 1)
+    if ":" not in prefix_text:
+        return None
+
+    namespace_raw, page_raw = prefix_text.split(":", 1)
+
+    namespace = canonicalise_title_fragment(namespace_raw)
+    page_name = canonicalise_title_fragment(page_raw)
+
+    if namespace not in SPECIAL_NAMESPACE_ALIASES:
+        return None
+    if page_name not in BOOKSOURCE_PAGE_ALIASES:
+        return None
+
+    isbn_text = suffix_text.strip()
+    return isbn_text or None
+
+
+def canonicalise_title_fragment(value: str) -> str:
+    # MediaWiki titles treat underscores and spaces similarly.
+    return "".join(ch for ch in value.strip().casefold()
+                   if not ch.isspace() and ch != "_")
+
+
+def split_isbn_prefixed_label(label: str) -> str | None:
+    text = label.strip()
+    if len(text) <= 4:
+        return None
+
+    if text[:4].casefold() != "isbn":
+        return None
+
+    rest = text[4:]
+    if not rest or not rest[0].isspace():
+        return None
+
+    extracted = rest.strip()
+    return extracted or None
+
+
+def get_template_param_by_name(template: Any, target_name: str) -> Any | None:
+    if not (target := target_name.strip().casefold()):
+        return None
+
+    return next(
+        (param for param in template.params
+         if str(param.name).strip().casefold() == target),
+        None,
+    )
+
+
+def is_cite_book_template(template: Any) -> bool:
+    return str(template.name).strip().casefold() == "cite book"
+
+
+def normalise_cite_book_isbn_templates(
+    code: Any,
+    groups: list[Group],
+    convert_10_to_13: bool,
+) -> int:
+    changed = 0
+    templates_found = list(
+        code.filter_templates(matches=is_cite_book_template))
+
+    for template in templates_found:
+        isbn_param = get_template_param_by_name(template, "isbn")
+        if isbn_param is None:
+            continue
+
+        raw_value = str(isbn_param.value).strip()
+        if not raw_value:
+            continue
+
+        normalised_value = normalise_if_isbn(
+            raw_value,
+            groups,
+            convert_10_to_13,
+        )
+        if normalised_value is None or normalised_value == raw_value:
+            continue
+
+        isbn_param.value = normalised_value
+        changed += 1
+
+    return changed
+
+
+def build_isbn_template_node(code_value: str, label_value: str | None) -> Any:
+    if label_value is None:
+        return mwparserfromhell.parse(f"{{{{ISBN|{code_value}}}}}").nodes[0]
+    return mwparserfromhell.parse(
+        f"{{{{ISBN|{code_value}|{label_value}}}}}").nodes[0]
+
+
+def normalise_if_isbn(
+    raw_value: str,
+    groups: list[Group],
+    convert_10_to_13: bool,
+) -> str | None:
+    key = isbn_equivalence_key(raw_value)
+    if key is None:
+        return None
+    return try_normalise_template_value(raw_value, groups, convert_10_to_13)
+
+
+def replace_booksource_links_with_isbn_templates(
+    code: Any,
+    groups: list[Group],
+    convert_10_to_13: bool,
+) -> int:
+    changed = 0
+    wikilinks = list(code.filter_wikilinks())
+
+    for wikilink in wikilinks:
+        link_isbn_raw = extract_booksource_isbn_from_title(wikilink.title)
+        if link_isbn_raw is None:
+            continue
+
+        normalised_link_isbn = normalise_if_isbn(
+            link_isbn_raw,
+            groups,
+            convert_10_to_13,
+        )
+        # If the title part is not a valid ISBN, do not touch this link.
+        if normalised_link_isbn is None:
+            continue
+
+        if wikilink.text is None:
+            continue
+
+        label_raw = str(wikilink.text).strip()
+        if not label_raw:
+            continue
+
+        label_isbn_raw = split_isbn_prefixed_label(label_raw)
+
+        if label_isbn_raw is not None:
+            label_isbn_normalised = normalise_if_isbn(
+                label_isbn_raw,
+                groups,
+                convert_10_to_13,
+            )
+            if (label_isbn_normalised is not None
+                    and are_semantically_equal_isbns(link_isbn_raw,
+                                                     label_isbn_raw)):
+                replacement = build_isbn_template_node(normalised_link_isbn,
+                                                       None)
+            else:
+                replacement = build_isbn_template_node(
+                    normalised_link_isbn,
+                    label_isbn_normalised
+                    if label_isbn_normalised is not None else label_raw,
+                )
+        else:
+            label_isbn_normalised = normalise_if_isbn(
+                label_raw,
+                groups,
+                convert_10_to_13,
+            )
+            replacement = build_isbn_template_node(
+                normalised_link_isbn,
+                label_isbn_normalised
+                if label_isbn_normalised is not None else label_raw,
+            )
+
+        code.replace(wikilink, replacement)
+        changed += 1
+
+    return changed
+
+
 def normalise_isbn_templates(
     text: str,
     xml_path: Path,
@@ -83,6 +269,16 @@ def normalise_isbn_templates(
     changed = 0
 
     code = mwparserfromhell.parse(text)
+    changed += normalise_cite_book_isbn_templates(
+        code,
+        groups,
+        convert_10_to_13,
+    )
+    changed += replace_booksource_links_with_isbn_templates(
+        code,
+        groups,
+        convert_10_to_13,
+    )
     templates_found = list(
         code.filter_templates(
             matches=lambda t: str(t.name).strip().lower() == "isbn"))
