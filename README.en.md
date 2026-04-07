@@ -11,6 +11,10 @@ A standalone normalisation tool and MediaWiki bot for the {{[ISBN](https://mzh.m
 - **isbn_normalise.py** — Pure ISBN normalization library
   - Hyphenate ISBN-10/13 per international registration group rules
   - Optional: Convert ISBN-10 to ISBN-13
+
+- **isbn_template_normalise.py** — Wikitext template normalization tool
+  - Batch-process `{{ISBN}}` template parameters
+  - Optional: Convert ISBN-10 to ISBN-13
   - Optional: When parameter 1 and 2 are semantically identical, make parameter 1 non-hyphenated and parameter 2 hyphenated
 
 - **mw_isbn_bot.py** — MediaWiki bot runtime
@@ -60,9 +64,9 @@ python isbn_normalise.py \
   9787302511625
 ```
 
-**Format single file:**
+**Format templates in a single file:**
 ```bash
-python isbn_normalise.py \
+python isbn_template_normalise.py \
   --xml RangeMessage.xml \
   --text-file your_wikitext.txt \
   -format \
@@ -71,7 +75,7 @@ python isbn_normalise.py \
 
 **Format + convert to ISBN-13:**
 ```bash
-python isbn_normalise.py \
+python isbn_template_normalise.py \
   --xml RangeMessage.xml \
   --text-file your_wikitext.txt \
   -format -to13 \
@@ -80,7 +84,7 @@ python isbn_normalise.py \
 
 **Format + rehyphenate semantically equal params:**
 ```bash
-python isbn_normalise.py \
+python isbn_template_normalise.py \
   --xml RangeMessage.xml \
   --text-file your_wikitext.txt \
   -format \
@@ -141,7 +145,11 @@ File: `.github/workflows/update-rangemessage.yml`
 
 - `isbn_normalise.py`:
   - Core ISBN normalisation logic
-  - Supports both single-ISBN output and batch template rewrite in wikitext
+  - Only handles single-ISBN input/output
+
+- `isbn_template_normalise.py`:
+  - Batch rewrite logic for `{{ISBN}}` templates in wikitext
+  - Reused by `mw_isbn_bot.py` and template-oriented CLI workflows
 
 - `mw_isbn_bot.py`:
   - MediaWiki bot entrypoint

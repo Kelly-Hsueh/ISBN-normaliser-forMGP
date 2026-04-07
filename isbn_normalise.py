@@ -13,7 +13,6 @@ import sys
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 
 @dataclass(frozen=True)
@@ -262,134 +261,6 @@ def normalise(raw_isbn: str,
     )
 
 
-def try_normalise_template_value(
-    raw_value: str,
-    groups: list[Group],
-    convert_10_to_13: bool,
-) -> str | None:
-    try:
-        return normalise_token(
-            raw_value,
-            groups,
-            convert_10_to_13=convert_10_to_13,
-            with_label=False,
-        )
-    except ValueError:
-        return None
-
-
-def get_template_label_value(
-    template: Any,
-    groups: list[Group],
-    convert_10_to_13: bool,
-) -> str | None:
-    if not template.has("2"):
-        return None
-
-    label_str = str(template.get("2").value).strip()
-    if not label_str:
-        return None
-
-    normalised = try_normalise_template_value(
-        label_str,
-        groups,
-        convert_10_to_13,
-    )
-    return normalised if normalised is not None else label_str
-
-
-def are_semantically_equal_isbns(
-    code_str: str,
-    output_label: str | None,
-) -> bool:
-    if output_label is None:
-        return False
-
-    key1 = isbn_equivalence_key(code_str)
-    key2 = isbn_equivalence_key(output_label)
-    return key1 is not None and key1 == key2
-
-
-def update_template_label(template: Any, output_label: str | None) -> None:
-    if output_label is None:
-        if template.has("2"):
-            template.remove("2")
-        return
-
-    if template.has("2"):
-        template.get("2").value = output_label
-    else:
-        template.add("2", output_label)
-
-
-def normalise_isbn_templates(
-        text: str,
-        xml_path: Path,
-        convert_10_to_13: bool = False,
-        rehyphenate_equal_label: bool = False) -> tuple[str, int]:
-    import mwparserfromhell.parser
-    groups = load_groups(xml_path)
-    changed = 0
-
-    # Parse the wikicode
-    code = mwparserfromhell.parse(text)
-
-    # Find all ISBN templates (case-insensitive match)
-    templates_found = list(
-        code.filter_templates(
-            matches=lambda t: str(t.name).strip().lower() == "isbn"))
-
-    for template in templates_found:
-        # Normalise template name to standard "ISBN" casing
-        template.name = "ISBN"
-
-        # Get parameter 1 (the ISBN code) - always required
-        if not template.has("1"):
-            continue
-
-        param1 = template.get("1")
-        code_str = str(param1.value).strip()
-
-        normalised_1 = try_normalise_template_value(
-            code_str,
-            groups,
-            convert_10_to_13,
-        )
-        if normalised_1 is None:
-            # If param 1 is not a valid ISBN, skip this template
-            continue
-
-        output_label = get_template_label_value(
-            template,
-            groups,
-            convert_10_to_13,
-        )
-
-        equal_isbn = are_semantically_equal_isbns(code_str, output_label)
-        output_code = normalised_1
-        if rehyphenate_equal_label and equal_isbn:
-            # For semantically equal params, keep a plain value in param1 and
-            # a hyphenated value in param2.
-            output_code = normalised_1.replace("-", "")
-
-        # Check if anything changed
-        original_code = code_str
-        original_label = str(
-            template.get("2").value).strip() if template.has("2") else None
-
-        if output_code == original_code and output_label == original_label:
-            # No changes needed
-            continue
-
-        # Update the template
-        changed += 1
-        # Always update parameter 1 with the normalised ISBN
-        template.get("1").value = output_code
-        update_template_label(template, output_label)
-
-    return str(code), changed
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Normalise ISBN-10/13 to hyphenated format "
@@ -405,27 +276,10 @@ def main() -> int:
         help="Path to ISBN range XML file.",
     )
     parser.add_argument(
-        "--text-file",
-        help="Path to wikitext file to rewrite ISBN templates.",
-    )
-    parser.add_argument(
-        "--in-place",
-        action="store_true",
-        help="Write output back to --text-file instead of printing.",
-    )
-    parser.add_argument(
         "-to13",
         "--to13",
         action="store_true",
         help="Convert ISBN-10 to ISBN-13 before output.",
-    )
-    parser.add_argument(
-        "--rehyphenate-equal-label",
-        action="store_true",
-        help=(
-            "When template parameter 1 and 2 are semantically the same ISBN, "
-            "set parameter 1 to non-hyphenated form and keep parameter 2 "
-            "hyphenated."),
     )
     parser.add_argument(
         "--no-label",
@@ -442,30 +296,8 @@ def main() -> int:
 
     xml_path = Path(args.xml)
 
-    if args.text_file:
-        try:
-            input_text = Path(args.text_file).read_text(encoding="utf-8")
-            output_text, changed = normalise_isbn_templates(
-                input_text,
-                xml_path,
-                convert_10_to_13=args.to13,
-                rehyphenate_equal_label=args.rehyphenate_equal_label,
-            )
-        except Exception as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            return 1
-
-        if args.in_place:
-            Path(args.text_file).write_text(output_text, encoding="utf-8")
-        else:
-            print(output_text)
-
-        print(f"Template replacements: {changed}", file=sys.stderr)
-        return 0
-
     if not args.isbn:
-        print("Error: ISBN input is required unless --text-file is used.",
-              file=sys.stderr)
+        print("Error: ISBN input is required.", file=sys.stderr)
         return 1
 
     try:

@@ -11,6 +11,10 @@
 - **isbn_normalise.py** — 纯 ISBN 规范化库
   - 按国际标准书号规则对 ISBN-10/13 进行连字符规范化
   - 可选：将 ISBN-10 转换为 ISBN-13
+
+- **isbn_template_normalise.py** — wikitext 模板规范化工具
+  - 批量处理 `{{ISBN}}` 模板参数
+  - 可选：将 ISBN-10 转换为 ISBN-13
   - 可选：当参数1和参数2语义相同时，将参数1改为无连字符并将参数2连字符化
 
 - **mw_isbn_bot.py** — MediaWiki 机器人运行时
@@ -53,15 +57,6 @@ pip install requests brotli mwparserfromhell
 
 ### 命令行工具
 
-**单文件格式化：**
-```bash
-python isbn_normalise.py \
-  --xml RangeMessage.xml \
-  --text-file your_wikitext.txt \
-  -format \
-  --in-place
-```
-
 **单个 ISBN 规范化：**
 ```bash
 python isbn_normalise.py \
@@ -69,9 +64,18 @@ python isbn_normalise.py \
   9787302511625
 ```
 
+**单文件模板格式化：**
+```bash
+python isbn_template_normalise.py \
+  --xml RangeMessage.xml \
+  --text-file your_wikitext.txt \
+  -format \
+  --in-place
+```
+
 **转换 + 转换为 ISBN-13：**
 ```bash
-python isbn_normalise.py \
+python isbn_template_normalise.py \
   --xml RangeMessage.xml \
   --text-file your_wikitext.txt \
   -format -to13 \
@@ -80,7 +84,7 @@ python isbn_normalise.py \
 
 **转换 + 相同语义参数重排：**
 ```bash
-python isbn_normalise.py \
+python isbn_template_normalise.py \
   --xml RangeMessage.xml \
   --text-file your_wikitext.txt \
   -format \
@@ -141,7 +145,11 @@ python mw_isbn_bot.py \
 
 - `isbn_normalise.py`：
   - ISBN 规范化核心逻辑
-  - 支持单个 ISBN 输出与 wikitext 模板批量处理
+  - 仅处理单个 ISBN 输入输出
+
+- `isbn_template_normalise.py`：
+  - wikitext 中 `{{ISBN}}` 模板批量处理逻辑
+  - 被 `mw_isbn_bot.py` 与命令行模板处理场景复用
 
 - `mw_isbn_bot.py`：
   - MediaWiki 机器人入口

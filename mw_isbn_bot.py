@@ -11,10 +11,10 @@ import time
 from pathlib import Path
 from typing import Any
 
-import requests
 import brotli
+import requests
 
-from isbn_normalise import normalise_isbn_templates
+from isbn_template_normalise import normalise_isbn_templates
 
 DEFAULT_USER_AGENT = (
     "ISBNNormaliserBot/1.0 "
