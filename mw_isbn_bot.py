@@ -484,7 +484,6 @@ def run_normalization_workflow(
         timeout=args.timeout,
         max_lag=args.maxlag,
     )
-    print(f"Collected pageids: {len(pageids)}")
     print(f"Fetched pages with revisions: {len(pages_by_id)}")
 
     processed, skipped_bots, changed, failed = process_pages(
