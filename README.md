@@ -18,8 +18,9 @@
   - 可选：当参数1和参数2语义相同时，将参数1改为无连字符并将参数2连字符化
 
 - **mw_isbn_bot.py** — MediaWiki 机器人运行时
-  - 自动获取嵌入 Template:ISBN 和其重定向的页面
-  - 支持分页查询（自动处理 continue）
+  - 使用 `generator=transcludedin` 一次性拉取嵌入 Template:ISBN 的页面及其修订版本
+  - 自动处理 API 分页（continue）和修订版本续取（rvcontinue）
+  - 当 API 返回结果超过大小限制时，打印警告信息并继续拉取后续数据
   - 检查 Allowbots 规则后再编辑
   - 支持编辑数量上限控制
 

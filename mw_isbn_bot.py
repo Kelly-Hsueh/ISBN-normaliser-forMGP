@@ -225,10 +225,11 @@ def is_underconstruction(text: str) -> bool:
     return bool(re.search(pattern, text, flags=re.IGNORECASE))
 
 
-def _collect_pageids_from_transcludedin_response(
+def _merge_generated_pages_with_revisions(
     data: dict[str, Any],
     pageids: list[int],
     seen: set[int],
+    pages_by_id: dict[int, dict[str, Any]],
 ) -> None:
     pages = data.get("query", {}).get("pages", [])
     if not isinstance(pages, list):
@@ -237,156 +238,89 @@ def _collect_pageids_from_transcludedin_response(
     for page in pages:
         if not isinstance(page, dict):
             continue
-        transcludedin = page.get("transcludedin", [])
-        if not isinstance(transcludedin, list):
+
+        pageid = page.get("pageid")
+        if not isinstance(pageid, int):
             continue
-        for item in transcludedin:
-            if not isinstance(item, dict):
+
+        if pageid not in seen:
+            seen.add(pageid)
+            pageids.append(pageid)
+
+        merged = dict(pages_by_id.get(pageid, {}))
+        for key, value in page.items():
+            if key == "revisions":
+                # Keep existing revisions when this chunk only carries metadata.
+                existing_revisions = merged.get("revisions")
+                if isinstance(value, list) and (
+                        value or not isinstance(existing_revisions, list)):
+                    merged[key] = value
                 continue
-            pageid = item.get("pageid")
-            if isinstance(pageid, int) and pageid not in seen:
-                seen.add(pageid)
-                pageids.append(pageid)
+            merged[key] = value
+        pages_by_id[pageid] = merged
 
 
-def _fetch_transcludedin_pageids_with_params(
+def fetch_transcluded_pages_with_revisions(
     session: requests.Session,
     wiki_api: str,
-    data: dict[str, Any],
+    template_title: str,
     timeout: int,
-    error_context: str,
-    api_error_prefix: str,
-    pageids: list[int],
-    seen: set[int],
-) -> None:
-    request_data = dict(data)
+    max_lag: int,
+) -> tuple[list[int], dict[int, dict[str, Any]], str]:
+    pageids: list[int] = []
+    seen: set[int] = set()
+    pages_by_id: dict[int, dict[str, Any]] = {}
+    curtimestamp = ""
+
+    request_data: dict[str, Any] = {
+        "action": "query",
+        "format": "json",
+        "maxlag": max_lag,
+        "prop": "revisions",
+        "titles": template_title,
+        "generator": "transcludedin",
+        "formatversion": 2,
+        "rvprop": "content|ids",
+        "rvslots": "main",
+        "gtilimit": "max",
+        "curtimestamp": 1,
+    }
+
     while True:
         response_data = api_post_json(
             session=session,
             wiki_api=wiki_api,
             data=request_data,
             timeout=timeout,
-            error_context=error_context,
+            error_context="Failed to fetch transcluded pages with revisions",
         )
         if "error" in response_data:
-            raise RuntimeError(f"{api_error_prefix}: {response_data['error']}")
+            raise RuntimeError(
+                f"API error on transcluded revisions query: {response_data['error']}"
+            )
 
-        _collect_pageids_from_transcludedin_response(response_data, pageids,
-                                                     seen)
+        # Check for API limits/truncation warnings
+        if warnings := response_data.get("warnings", {}).get("result", {}):
+            if warning_msg := warnings.get("warnings", ""):
+                print(f"[API WARNING] {warning_msg}", file=sys.stderr)
+
+        if not curtimestamp and isinstance(response_data.get("curtimestamp"),
+                                           str):
+            curtimestamp = response_data["curtimestamp"]
+
+        _merge_generated_pages_with_revisions(
+            response_data,
+            pageids,
+            seen,
+            pages_by_id,
+        )
 
         cont = response_data.get("continue")
         if not isinstance(cont, dict):
             break
         request_data |= cont
 
-
-def fetch_transcluded_pageids(
-    session: requests.Session,
-    wiki_api: str,
-    template_title: str,
-    timeout: int,
-    max_lag: int,
-    include_redirects: bool,
-) -> list[int]:
-    pageids: list[int] = []
-    seen: set[int] = set()
-
-    data: dict[str, Any] = {
-        "action": "query",
-        "format": "json",
-        "maxlag": max_lag,
-        "prop": "transcludedin",
-        "titles": template_title,
-        "formatversion": 2,
-        "tiprop": "pageid",
-        "tilimit": "max",
-    }
-    _fetch_transcludedin_pageids_with_params(
-        session=session,
-        wiki_api=wiki_api,
-        data=data,
-        timeout=timeout,
-        error_context="Failed to fetch transcludedin pages",
-        api_error_prefix="API error on transcludedin query",
-        pageids=pageids,
-        seen=seen,
-    )
-
-    if include_redirects:
-        data = {
-            "action": "query",
-            "format": "json",
-            "maxlag": max_lag,
-            "prop": "transcludedin",
-            "titles": template_title,
-            "generator": "redirects",
-            "formatversion": 2,
-            "tiprop": "pageid",
-            "tilimit": "max",
-        }
-        _fetch_transcludedin_pageids_with_params(
-            session=session,
-            wiki_api=wiki_api,
-            data=data,
-            timeout=timeout,
-            error_context="Failed to fetch redirect transcludedin pages",
-            api_error_prefix="API error on redirect transcludedin query",
-            pageids=pageids,
-            seen=seen,
-        )
-
-    return pageids
-
-
-def chunked(values: list[int], size: int) -> list[list[int]]:
-    return [values[idx:idx + size] for idx in range(0, len(values), size)]
-
-
-def fetch_pages_content_by_pageid(
-    session: requests.Session,
-    wiki_api: str,
-    pageids: list[int],
-    timeout: int,
-    max_lag: int,
-) -> tuple[dict[int, dict[str, Any]], str]:
-    results: dict[int, dict[str, Any]] = {}
-    curtimestamp: str = ""
-
-    for batch in chunked(pageids, 50):
-        data: dict[str, Any] = {
-            "action": "query",
-            "format": "json",
-            "maxlag": max_lag,
-            "prop": "revisions",
-            "pageids": "|".join(str(pid) for pid in batch),
-            "formatversion": 2,
-            "rvprop": "content|ids",
-            "rvslots": "main",
-            "curtimestamp": 1,
-        }
-        data = api_post_json(
-            session=session,
-            wiki_api=wiki_api,
-            data=data,
-            timeout=timeout,
-            error_context="Failed to fetch page revisions",
-        )
-        if "error" in data:
-            raise RuntimeError(
-                f"API error on revisions query: {data['error']}")
-
-        if not curtimestamp:
-            curtimestamp = data.get("batchcomplete") and data.get(
-                "curtimestamp", "") or ""
-
-        pages = data.get("query", {}).get("pages", [])
-        if isinstance(pages, list):
-            for page in pages:
-                if isinstance(page, dict) and isinstance(
-                        page.get("pageid"), int):
-                    results[page["pageid"]] = page
-
-    return results, curtimestamp
+    return pageids, pages_by_id, curtimestamp
 
 
 def extract_main_content(page: dict[str, Any]) -> str | None:
@@ -524,7 +458,6 @@ def run_normalization_workflow(
     bot_username: str,
     bot_password: str,
     xml_path: Path,
-    include_redirects: bool,
     use_bot_flag: bool,
 ) -> int:
     login_with_bot_password(
@@ -544,23 +477,14 @@ def run_normalization_workflow(
         assert_user=assert_user,
     )
 
-    pageids = fetch_transcluded_pageids(
+    pageids, pages_by_id, curtimestamp = fetch_transcluded_pages_with_revisions(
         session=session,
         wiki_api=wiki_api,
         template_title=args.template_title,
         timeout=args.timeout,
         max_lag=args.maxlag,
-        include_redirects=include_redirects,
     )
     print(f"Collected pageids: {len(pageids)}")
-
-    pages_by_id, curtimestamp = fetch_pages_content_by_pageid(
-        session=session,
-        wiki_api=wiki_api,
-        pageids=pageids,
-        timeout=args.timeout,
-        max_lag=args.maxlag,
-    )
     print(f"Fetched pages with revisions: {len(pages_by_id)}")
 
     processed, skipped_bots, changed, failed = process_pages(
@@ -720,8 +644,6 @@ def execute(args: argparse.Namespace) -> int:
             args)
         xml_path = validate_xml_path(args.xml)
 
-        include_redirects = parse_bool_env(str(args.include_redirects),
-                                           default=True)
         use_bot_flag = parse_bool_env(str(args.bot_flag), default=True)
 
         session = build_session(user_agent)
@@ -732,7 +654,6 @@ def execute(args: argparse.Namespace) -> int:
             bot_username=bot_username,
             bot_password=bot_password,
             xml_path=xml_path,
-            include_redirects=include_redirects,
             use_bot_flag=use_bot_flag,
         )
     except Exception as exc:
@@ -809,11 +730,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.2,
         help="Seconds to sleep between successful edits.",
-    )
-    parser.add_argument(
-        "--include-redirects",
-        default="true",
-        help="Whether to query generator=redirects transclusions (true/false).",
     )
     parser.add_argument(
         "--bot-flag",

@@ -18,8 +18,9 @@ A standalone normalisation tool and MediaWiki bot for the {{[ISBN](https://mzh.m
   - Optional: When parameter 1 and 2 are semantically identical, make parameter 1 non-hyphenated and parameter 2 hyphenated
 
 - **mw_isbn_bot.py** — MediaWiki bot runtime
-  - Auto-fetch pages transcluding Template:ISBN and its redirects
-  - Paginated queries with automatic continue handling
+  - Fetch pages transcluding Template:ISBN and their revisions in a single `generator=transcludedin` query
+  - Automatic pagination via API continue and revision version continuation (rvcontinue)
+  - Detect and log API size limit warnings while continuing to fetch remaining data
   - Allowbots compliance check before editing
   - Configurable edit count limit per run
 

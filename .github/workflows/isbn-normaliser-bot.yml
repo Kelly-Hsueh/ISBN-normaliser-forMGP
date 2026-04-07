@@ -31,7 +31,7 @@ jobs:
           BOT_USERNAME: ${{ secrets.BOT_USERNAME }}
           BOT_PASSWORD: ${{ secrets.BOT_PASSWORD }}
         run: |
-          ARGS="--template-title \"Template:ISBN\" --include-redirects true --bot-flag true"
+          ARGS="--template-title \"Template:ISBN\" --bot-flag true"
           if [ -n "${{ github.event.inputs.max_edits }}" ]; then
             ARGS="$ARGS --max-edits ${{ github.event.inputs.max_edits }}"
           fi
