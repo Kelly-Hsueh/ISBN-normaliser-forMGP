@@ -23,9 +23,19 @@ jobs:
           git config --local user.name "GitHub Action"
           git add RangeMessage.xml
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            msg="Semiautomated update RangeMessage.xml by @${GITHUB_ACTOR}"
+            msg=$(cat <<EOF
+chore(deps): update RangeMessage.xml
+
+- triggered manually by @${GITHUB_ACTOR}
+EOF
+)
           else
-            msg="Automated update RangeMessage.xml by scheduled workflow"
+            msg=$(cat <<EOF
+chore(deps): update RangeMessage.xml
+
+- automated by GitHub Actions (scheduled)
+EOF
+)
           fi
           git commit -m "$msg" || echo "No changes to commit"
           git push
