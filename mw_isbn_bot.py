@@ -21,6 +21,10 @@ DEFAULT_USER_AGENT = (
     "(https://github.com/kelly/ISBN-normaliser) requests/2.x")
 DEFAULT_WIKI_API = "https://mzh.moegirl.org.cn/api.php"
 
+# Debug-only override: when non-empty, only these pageids are fetched and processed.
+# Example: DEBUG_TARGET_PAGEIDS = [12345, 67890]
+DEBUG_TARGET_PAGEIDS: list[int] = [497944]
+
 
 def parse_bool_env(raw_value: str, *, default: bool) -> bool:
     value = raw_value.strip().lower()
@@ -323,6 +327,72 @@ def fetch_transcluded_pages_with_revisions(
     return pageids, pages_by_id, curtimestamp
 
 
+def fetch_pages_by_pageids_with_revisions(
+    session: requests.Session,
+    wiki_api: str,
+    pageids: list[int],
+    timeout: int,
+    max_lag: int,
+) -> tuple[list[int], dict[int, dict[str, Any]], str]:
+    target_ids = [pid for pid in pageids if isinstance(pid, int) and pid > 0]
+    if not target_ids:
+        return [], {}, ""
+
+    ordered_pageids: list[int] = []
+    pages_by_id: dict[int, dict[str, Any]] = {}
+    curtimestamp = ""
+
+    # MediaWiki API accepts multiple pageids split by '|'. Keep chunks modest.
+    chunk_size = 50
+    for i in range(0, len(target_ids), chunk_size):
+        chunk = target_ids[i:i + chunk_size]
+        response_data = api_post_json(
+            session=session,
+            wiki_api=wiki_api,
+            data={
+                "action": "query",
+                "format": "json",
+                "formatversion": 2,
+                "maxlag": max_lag,
+                "prop": "revisions",
+                "pageids": "|".join(str(pid) for pid in chunk),
+                "rvprop": "content|ids",
+                "rvslots": "main",
+                "curtimestamp": 1,
+            },
+            timeout=timeout,
+            error_context="Failed to fetch pages by pageid with revisions",
+        )
+        if "error" in response_data:
+            raise RuntimeError(
+                f"API error on pageid revisions query: {response_data['error']}"
+            )
+
+        if not curtimestamp and isinstance(response_data.get("curtimestamp"),
+                                           str):
+            curtimestamp = response_data["curtimestamp"]
+
+        pages = response_data.get("query", {}).get("pages", [])
+        if not isinstance(pages, list):
+            continue
+
+        for page in pages:
+            if not isinstance(page, dict):
+                continue
+            pageid = page.get("pageid")
+            if not isinstance(pageid, int):
+                continue
+
+            if pageid not in ordered_pageids:
+                ordered_pageids.append(pageid)
+
+            pages_by_id[pageid] = page
+
+    # Keep caller-provided order, but only for pages successfully fetched.
+    ordered = [pid for pid in target_ids if pid in pages_by_id]
+    return ordered, pages_by_id, curtimestamp
+
+
 def extract_main_content(page: dict[str, Any]) -> str | None:
     revisions = page.get("revisions")
     if not isinstance(revisions, list) or not revisions:
@@ -477,14 +547,27 @@ def run_normalization_workflow(
         assert_user=assert_user,
     )
 
-    pageids, pages_by_id, curtimestamp = fetch_transcluded_pages_with_revisions(
-        session=session,
-        wiki_api=wiki_api,
-        template_title=args.template_title,
-        timeout=args.timeout,
-        max_lag=args.maxlag,
-    )
-    print(f"Fetched pages with revisions: {len(pages_by_id)}")
+    if DEBUG_TARGET_PAGEIDS:
+        pageids, pages_by_id, curtimestamp = (
+            fetch_pages_by_pageids_with_revisions(
+                session=session,
+                wiki_api=wiki_api,
+                pageids=DEBUG_TARGET_PAGEIDS,
+                timeout=args.timeout,
+                max_lag=args.maxlag,
+            ))
+        print("Fetched pages with revisions (test pageids): "
+              f"{len(pages_by_id)}")
+    else:
+        pageids, pages_by_id, curtimestamp = (
+            fetch_transcluded_pages_with_revisions(
+                session=session,
+                wiki_api=wiki_api,
+                template_title=args.template_title,
+                timeout=args.timeout,
+                max_lag=args.maxlag,
+            ))
+        print(f"Fetched pages with revisions: {len(pages_by_id)}")
 
     processed, skipped_bots, changed, failed = process_pages(
         args=args,
