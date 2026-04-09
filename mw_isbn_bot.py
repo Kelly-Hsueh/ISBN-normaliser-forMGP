@@ -23,7 +23,7 @@ DEFAULT_WIKI_API = "https://mzh.moegirl.org.cn/api.php"
 
 # Debug-only override: when non-empty, only these pageids are fetched and processed.
 # Example: DEBUG_TARGET_PAGEIDS = [12345, 67890]
-DEBUG_TARGET_PAGEIDS: list[int] = [497944]
+DEBUG_TARGET_PAGEIDS: list[int] = []
 
 
 def parse_bool_env(raw_value: str, *, default: bool) -> bool:
