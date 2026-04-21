@@ -3,6 +3,11 @@ name: ISBN Normaliser Bot
 on:
   workflow_dispatch:
     inputs:
+      dry_run:
+        description: 'Run in dry-run mode (no edits will be saved)?'
+        required: false
+        default: false
+        type: boolean
       max_edits:
         description: 'Maximum number of edits to perform (optional, leave empty for unlimited)'
         required: false
@@ -31,7 +36,10 @@ jobs:
           BOT_USERNAME: ${{ secrets.BOT_USERNAME }}
           BOT_PASSWORD: ${{ secrets.BOT_PASSWORD }}
         run: |
-          ARGS="--template-title \"Template:ISBN\" --bot-flag true"
+          ARGS=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
           if [ -n "${{ github.event.inputs.max_edits }}" ]; then
             ARGS="$ARGS --max-edits ${{ github.event.inputs.max_edits }}"
           fi
