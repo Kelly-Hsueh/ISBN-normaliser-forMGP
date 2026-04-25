@@ -17,8 +17,9 @@ import requests
 from isbn_template_normalise import normalise_isbn_templates
 
 DEFAULT_USER_AGENT = (
-    "ISBNNormaliserBot/1.0 "
-    "(https://github.com/kelly/ISBN-normaliser) requests/2.x")
+    "ISBNNormaliser-Bot/1.1 "
+    "(https://github.com/kelly/ISBN-normaliser; 75931686+Kelly-Hsueh@users.noreply.github.com) "
+    "requests/2.33.x")
 DEFAULT_WIKI_API = "https://mzh.moegirl.org.cn/api.php"
 
 # Debug-only override: when non-empty, only these pageids are fetched and processed.
