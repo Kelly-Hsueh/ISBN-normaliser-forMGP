@@ -28,5 +28,5 @@ jobs:
             trigger="automated by GitHub Actions"
           fi
           msg=$(printf "chore(deps): update RangeMessage.xml\n\n%s" "$trigger")
-          git commit -m -s "$msg" || echo "No changes to commit"
+          git commit -s -m "$msg" || echo "No changes to commit"
           git push
