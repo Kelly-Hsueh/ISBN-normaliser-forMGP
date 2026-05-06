@@ -307,9 +307,15 @@ def normalise_isbn_templates(
         )
 
         equal_isbn = are_semantically_equal_isbns(code_str, output_label)
-        output_code = normalised_1
         if rehyphenate_equal_label and equal_isbn:
-            output_code = normalised_1.replace("-", "")
+            changed += 1
+            template.name = "ISBNT"
+            template.get("1").value = normalised_1
+            if template.has("2"):
+                template.remove("2")
+            continue
+
+        output_code = normalised_1
 
         original_code = code_str
         original_label = str(
@@ -355,7 +361,7 @@ def main() -> int:
         action="store_true",
         help=(
             "When template parameter 1 and 2 are semantically the same ISBN, "
-            "set parameter 1 to non-hyphenated form and keep parameter 2 "
+            "replace the template with {{ISBNT|$1}} and keep parameter 1 "
             "hyphenated."),
     )
     parser.add_argument(

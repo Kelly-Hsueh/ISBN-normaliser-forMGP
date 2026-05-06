@@ -15,7 +15,7 @@
 - **isbn_template_normalise.py** — wikitext 模板规范化工具
   - 批量处理 `{{ISBN}}` 模板参数
   - 可选：将 ISBN-10 转换为 ISBN-13
-  - 可选：当参数1和参数2语义相同时，将参数1改为无连字符并将参数2连字符化
+  - 可选：当参数1和参数2语义相同时，将模板替换为 `{{ISBNT|$1}}`，其中 `$1` 为连字符化 ISBN
 
 - **mw_isbn_bot.py** — MediaWiki 机器人运行时
   - 使用 `generator=transcludedin` 一次性拉取嵌入 Template:ISBN 的页面及其修订版本
@@ -83,7 +83,7 @@ python isbn_template_normalise.py \
   --in-place
 ```
 
-**转换 + 相同语义参数重排：**
+**转换 + 相同语义参数转为 ISBNT：**
 ```bash
 python isbn_template_normalise.py \
   --xml RangeMessage.xml \
@@ -187,7 +187,7 @@ BOT_PASSWORD=YourBotPassword
 
 - 始终规范化模板第 1 参数（当有效时）
 - 默认保持第 2 参数不变
-- 仅在显式启用且语义相同时：将第 1 参数改为无连字符，将第 2 参数规范化为连字符格式
+- 仅在显式启用且语义相同时：将模板改为 `{{ISBNT|$1}}`，并保持第 1 参数为连字符格式
 - 编辑摘要：`根据 ISO 2108:2017（https://www.iso.org/standard/65483.html ）自动调整ISBN（若阁下对此次修改感到疑惑，可以前往 https://grp.isbn-international.org/ 查找出版社前缀信息）`
 
 ## 故障排查

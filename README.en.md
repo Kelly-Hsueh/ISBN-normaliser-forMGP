@@ -15,7 +15,7 @@ A standalone normalisation tool and MediaWiki bot for the {{[ISBN](https://mzh.m
 - **isbn_template_normalise.py** — Wikitext template normalization tool
   - Batch-process `{{ISBN}}` template parameters
   - Optional: Convert ISBN-10 to ISBN-13
-  - Optional: When parameter 1 and 2 are semantically identical, make parameter 1 non-hyphenated and parameter 2 hyphenated
+  - Optional: When parameter 1 and 2 are semantically identical, replace the template with `{{ISBNT|$1}}`, where `$1` is the hyphenated ISBN
 
 - **mw_isbn_bot.py** — MediaWiki bot runtime
   - Fetch pages transcluding Template:ISBN and their revisions in a single `generator=transcludedin` query
@@ -83,7 +83,7 @@ python isbn_template_normalise.py \
   --in-place
 ```
 
-**Format + rehyphenate semantically equal params:**
+**Format + convert semantically equal params to ISBNT:**
 ```bash
 python isbn_template_normalise.py \
   --xml RangeMessage.xml \
@@ -187,7 +187,7 @@ Notes:
 
 - Always normalise template parameter 1 (when valid)
 - Keep parameter 2 unchanged by default
-- Only when explicitly enabled and semantically identical: make parameter 1 non-hyphenated and normalise parameter 2 to hyphenated form
+- Only when explicitly enabled and semantically identical: rewrite the template as `{{ISBNT|$1}}` and keep parameter 1 hyphenated
 - Edit summary: `根据 ISO 2108:2017（https://www.iso.org/standard/65483.html ）自动调整ISBN（若阁下对此次修改感到疑惑，可以前往 https://grp.isbn-international.org/ 查找出版社前缀信息）`
 
 ## Troubleshooting

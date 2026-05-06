@@ -767,7 +767,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "When template param1 and param2 are semantically the same ISBN, "
-            "set param1 to non-hyphenated form and keep param2 hyphenated."),
+            "replace the template with {{ISBNT|$1}} and keep param1 "
+            "hyphenated."),
     )
     parser.add_argument(
         "--wiki-api",
