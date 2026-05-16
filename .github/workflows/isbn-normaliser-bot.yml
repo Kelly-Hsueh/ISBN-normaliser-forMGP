@@ -1,17 +1,19 @@
 name: ISBN Normaliser Bot
+permissions:
+  contents: read
 
 on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: 'Run in dry-run mode (no edits will be saved)?'
+        description: "Run in dry-run mode (no edits will be saved)?"
         required: false
         default: false
         type: boolean
       max_edits:
-        description: 'Maximum number of edits to perform (optional, leave empty for unlimited)'
+        description: "Maximum number of edits to perform (optional, leave empty for unlimited)"
         required: false
-        default: ''
+        default: ""
   # schedule:
   #   - cron: '15 20 * * *'
 
@@ -24,7 +26,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6.2.0
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install dependencies
         run: |
