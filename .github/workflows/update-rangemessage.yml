@@ -22,11 +22,17 @@ jobs:
           git config --local user.name "github-actions[bot]"
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git add RangeMessage.xml
+          commit_title="chore(deps): update RangeMessage.xml"
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            trigger="triggered manually by @${GITHUB_ACTOR}"
+              commit_body="triggered manually by @${GITHUB_ACTOR}."
           else
-            trigger="automated by GitHub Actions"
+              commit_body="automated by GitHub Actions."
           fi
-          msg=$(printf "chore(deps): update RangeMessage.xml\n\n%s" "$trigger")
-          git commit -s -m "$msg" || echo "No changes to commit"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+              commit_trailers="Signed-off-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>\nCo-authored-by: ${GITHUB_ACTOR} <${GITHUB_ACTOR}@users.noreply.github.com>"
+          else
+              commit_trailers="Signed-off-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+          fi
+          full_msg=$(printf "%s\n\n%b\n\n%b" $commit_title $commit_body $commit_trailers)
+          git commit -m "$full_msg" || echo "No changes to commit"
           git push
