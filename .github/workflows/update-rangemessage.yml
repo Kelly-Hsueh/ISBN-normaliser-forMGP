@@ -28,12 +28,11 @@ jobs:
           else
               commit_body="automated by GitHub Actions."
           fi
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-              commit_trailers="Signed-off-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
-              commit_trailers="$commit_trailers\nCo-authored-by: ${GITHUB_ACTOR} <${GITHUB_ACTOR}@users.noreply.github.com>"
-          else
-              commit_trailers="Signed-off-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
-          fi
+            if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+              commit_trailers="Co-authored-by: ${GITHUB_ACTOR} <${GITHUB_ACTOR}@users.noreply.github.com>"
+            else
+              commit_trailers=""
+            fi
           full_msg=$(printf "%s\n\n%s\n\n%b" "$commit_title" "$commit_body" "$commit_trailers")
           git commit -c commit.gpgsign=false -m "$full_msg" || echo "No changes to commit"
           git push
