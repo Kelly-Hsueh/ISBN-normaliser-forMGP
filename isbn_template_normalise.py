@@ -14,7 +14,6 @@ from isbn_normalise import Group, isbn_equivalence_key, load_groups, normalise_t
 
 SPECIAL_NAMESPACE_ALIASES = frozenset({"special", "特殊"})
 BOOKSOURCE_PAGE_ALIASES = frozenset({"网络书源", "網絡書源", "booksources"})
-DEFAULT_TEMPLATE_NAME_ALIASES = frozenset({"isbn", "isbnt", "citebook"})
 
 
 def try_normalise_template_value(
@@ -113,16 +112,17 @@ def canonicalise_title_fragment(value: str) -> str:
                    if not ch.isspace() and ch != "_")
 
 
-def parse_template_name_aliases(template_titles: str | None) -> frozenset[str]:
-    if not template_titles:
-        return DEFAULT_TEMPLATE_NAME_ALIASES
+def parse_template_name_aliases(
+        template_preferred_map: dict[str, str] | None) -> frozenset[str]:
+    # Derive canonical aliases from the provided preferred-name mapping.
+    if not template_preferred_map:
+        return frozenset()
+    return frozenset(template_preferred_map.keys())
 
-    aliases = {
-        canonicalise_title_fragment(title.rsplit(":", 1)[-1])
-        for title in template_titles.split("|")
-        if canonicalise_title_fragment(title.rsplit(":", 1)[-1])
-    }
-    return frozenset(aliases) if aliases else DEFAULT_TEMPLATE_NAME_ALIASES
+
+# The preferred-name mapping should come from the MediaWiki API via the bot
+# process. Do not hardcode defaults here; when called from CLI, the caller
+# may provide a mapping constructed from user input if desired.
 
 
 def split_isbn_prefixed_label(label: str) -> str | None:
@@ -191,11 +191,17 @@ def normalise_cite_book_isbn_templates(
     return changed
 
 
-def build_isbn_template_node(code_value: str, label_value: str | None) -> Any:
+def build_isbn_template_node(
+    code_value: str,
+    label_value: str | None,
+    template_name: str = "ISBN",
+) -> Any:
+    # Keep the template name as provided (preserve user's casing).
     if label_value is None:
-        return mwparserfromhell.parse(f"{{{{ISBN|{code_value}}}}}").nodes[0]
+        return mwparserfromhell.parse(
+            f"{{{{{template_name}|{code_value}}}}}").nodes[0]
     return mwparserfromhell.parse(
-        f"{{{{ISBN|{code_value}|{label_value}}}}}").nodes[0]
+        f"{{{{{template_name}|{code_value}|{label_value}}}}}").nodes[0]
 
 
 def normalise_if_isbn(
@@ -213,6 +219,7 @@ def replace_booksource_links_with_isbn_templates(
     code: Any,
     groups: list[Group],
     convert_10_to_13: bool,
+    template_preferred_map: dict[str, str] | None = None,
 ) -> int:
     changed = 0
     wikilinks = list(code.filter_wikilinks())
@@ -240,6 +247,15 @@ def replace_booksource_links_with_isbn_templates(
 
         label_isbn_raw = split_isbn_prefixed_label(label_raw)
 
+        # choose preferred template name: prefer explicit 'isbn' from mapping,
+        # otherwise pick any mapping value, otherwise default to 'ISBN'.
+        preferred_template = "ISBN"
+        if template_preferred_map:
+            if (pt := template_preferred_map.get("isbn")):
+                preferred_template = pt
+            elif vals := list(template_preferred_map.values()):
+                preferred_template = vals[0]
+
         if label_isbn_raw is not None:
             label_isbn_normalised = normalise_if_isbn(
                 label_isbn_raw,
@@ -250,12 +266,14 @@ def replace_booksource_links_with_isbn_templates(
                     and are_semantically_equal_isbns(link_isbn_raw,
                                                      label_isbn_raw)):
                 replacement = build_isbn_template_node(normalised_link_isbn,
-                                                       None)
+                                                       None,
+                                                       preferred_template)
             else:
                 replacement = build_isbn_template_node(
                     normalised_link_isbn,
                     label_isbn_normalised
                     if label_isbn_normalised is not None else label_raw,
+                    preferred_template,
                 )
         else:
             label_isbn_normalised = normalise_if_isbn(
@@ -267,6 +285,7 @@ def replace_booksource_links_with_isbn_templates(
                 normalised_link_isbn,
                 label_isbn_normalised
                 if label_isbn_normalised is not None else label_raw,
+                preferred_template,
             )
 
         code.replace(wikilink, replacement)
@@ -280,11 +299,11 @@ def normalise_isbn_templates(
     xml_path: Path,
     convert_10_to_13: bool = False,
     rehyphenate_equal_label: bool = False,
-    template_titles: str | None = None,
+    template_preferred_map: dict[str, str] | None = None,
 ) -> tuple[str, int]:
     groups = load_groups(xml_path)
     changed = 0
-    template_name_aliases = parse_template_name_aliases(template_titles)
+    template_name_aliases = parse_template_name_aliases(template_preferred_map)
 
     code = mwparserfromhell.parse(text)
     changed += normalise_cite_book_isbn_templates(
@@ -297,6 +316,7 @@ def normalise_isbn_templates(
         code,
         groups,
         convert_10_to_13,
+        template_preferred_map,
     )
     templates_found = list(
         code.filter_templates(matches=lambda t: canonicalise_title_fragment(
@@ -326,7 +346,15 @@ def normalise_isbn_templates(
         equal_isbn = are_semantically_equal_isbns(code_str, output_label)
         if rehyphenate_equal_label and equal_isbn:
             changed += 1
-            template.name = "ISBNT"
+            # Only rename to the user's preferred ISBNT template if they
+            # explicitly provided one; otherwise keep the original template
+            # name.
+            if template_preferred_map:
+                preferred_isbnt = template_preferred_map.get("isbnt")
+            else:
+                preferred_isbnt = None
+            if preferred_isbnt:
+                template.name = preferred_isbnt
             template.get("1").value = normalised_1
             if template.has("2"):
                 template.remove("2")

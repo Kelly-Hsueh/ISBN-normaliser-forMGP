@@ -14,7 +14,10 @@ from typing import Any
 import brotli
 import requests
 
-from isbn_template_normalise import normalise_isbn_templates
+from isbn_template_normalise import (
+    normalise_isbn_templates,
+    canonicalise_title_fragment,
+)
 
 DEFAULT_USER_AGENT = (
     "ISBNNormaliser-Bot/1.1 "
@@ -438,14 +441,86 @@ def normalise_page_isbn_templates(
     content: str,
     args: argparse.Namespace,
     xml_path: Path,
+    template_preferred_map: dict[str, str] | None = None,
 ) -> tuple[str, int]:
     return normalise_isbn_templates(
         content,
         xml_path,
         convert_10_to_13=args.to13,
         rehyphenate_equal_label=args.rehyphenate_equal_label,
-        template_titles=args.template_title,
+        template_preferred_map=template_preferred_map,
     )
+
+
+def resolve_template_aliases(
+    session: requests.Session,
+    wiki_api: str,
+    template_titles: str | None,
+    timeout: int,
+    max_lag: int,
+) -> dict[str, str]:
+    # Start with user-provided preferred names as seeds (if any).
+    preferred: dict[str, str] = {}
+    if template_titles:
+        for title in template_titles.split("|"):
+            frag = title.rsplit(":", 1)[-1].strip()
+            if not frag:
+                continue
+            if key := canonicalise_title_fragment(frag):
+                preferred.setdefault(key, frag)
+    if not template_titles:
+        # No user-provided names; we'll still try to build mapping from API.
+        preferred = {}
+
+    try:
+        data = api_post_json(
+            session=session,
+            wiki_api=wiki_api,
+            data={
+                "action": "query",
+                "format": "json",
+                "prop": "redirects",
+                "titles": template_titles,
+                "redirects": 1,
+                "formatversion": "2",
+                "rdprop": "title",
+            },
+            timeout=timeout,
+            error_context="Failed to resolve template redirects",
+        )
+    except Exception:
+        return preferred
+
+    pages = data.get("query", {}).get("pages", [])
+    if not isinstance(pages, list):
+        return preferred
+
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+        page_title = page.get("title")
+        if not isinstance(page_title, str):
+            continue
+        page_frag = page_title.rsplit(":", 1)[-1].strip()
+        if not page_frag:
+            continue
+        page_key = canonicalise_title_fragment(page_frag)
+        # If user already specified a preferred name for this key, keep it;
+        # otherwise use the API page title fragment as preferred.
+        preferred.setdefault(page_key, page_frag)
+
+        for rd in page.get("redirects", []) or []:
+            rd_title = rd.get("title")
+            if not isinstance(rd_title, str):
+                continue
+            rd_frag = rd_title.rsplit(":", 1)[-1].strip()
+            if not rd_frag:
+                continue
+            rd_key = canonicalise_title_fragment(rd_frag)
+            # Map redirect canonical -> page's preferred (unless user overrode)
+            preferred.setdefault(rd_key, preferred.get(page_key, page_frag))
+
+    return preferred
 
 
 def edit_page_text(
@@ -549,6 +624,15 @@ def run_normalization_workflow(
         assert_user=assert_user,
     )
 
+    # Resolve template aliases via the API so we use site-aware preferred names
+    template_preferred_map = resolve_template_aliases(
+        session=session,
+        wiki_api=wiki_api,
+        template_titles=args.template_title,
+        timeout=args.timeout,
+        max_lag=args.maxlag,
+    )
+
     if DEBUG_TARGET_PAGEIDS:
         pageids, pages_by_id, curtimestamp = (
             fetch_pages_by_pageids_with_revisions(
@@ -582,6 +666,7 @@ def run_normalization_workflow(
         csrf_token=csrf_token,
         use_bot_flag=use_bot_flag,
         start_timestamp=curtimestamp,
+        template_preferred_map=template_preferred_map,
     )
 
     result_msg = (f"Done. processed={processed}, changed={changed}, "
@@ -658,6 +743,7 @@ def process_pages(
     csrf_token: str,
     use_bot_flag: bool,
     start_timestamp: str = "",
+    template_preferred_map: dict[str, str] | None = None,
 ) -> tuple[int, int, int, int]:
     processed = 0
     skipped_bots = 0
@@ -688,6 +774,7 @@ def process_pages(
             content,
             args,
             xml_path,
+            template_preferred_map=template_preferred_map,
         )
         if replacements <= 0 or new_text == content:
             continue
@@ -768,7 +855,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "When template param1 and param2 are semantically the same ISBN, "
-            "replace the template with {{ISBNT|$1}} and keep param1 "
+            "replace the template with {{ISBNT|$1}} and keep parameter 1 "
             "hyphenated."),
     )
     parser.add_argument(
