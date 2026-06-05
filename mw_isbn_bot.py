@@ -444,6 +444,7 @@ def normalise_page_isbn_templates(
         xml_path,
         convert_10_to_13=args.to13,
         rehyphenate_equal_label=args.rehyphenate_equal_label,
+        template_titles=args.template_title,
     )
 
 
@@ -788,7 +789,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--template-title",
-        default="Template:ISBN|Template:Cite book",
+        default="Template:ISBN|Template:ISBNT|Template:Cite book",
         help="Template title for transclusion lookup.",
     )
     parser.add_argument(

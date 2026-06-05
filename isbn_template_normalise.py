@@ -14,6 +14,7 @@ from isbn_normalise import Group, isbn_equivalence_key, load_groups, normalise_t
 
 SPECIAL_NAMESPACE_ALIASES = frozenset({"special", "特殊"})
 BOOKSOURCE_PAGE_ALIASES = frozenset({"网络书源", "網絡書源", "booksources"})
+DEFAULT_TEMPLATE_NAME_ALIASES = frozenset({"isbn", "isbnt", "citebook"})
 
 
 def try_normalise_template_value(
@@ -112,6 +113,18 @@ def canonicalise_title_fragment(value: str) -> str:
                    if not ch.isspace() and ch != "_")
 
 
+def parse_template_name_aliases(template_titles: str | None) -> frozenset[str]:
+    if not template_titles:
+        return DEFAULT_TEMPLATE_NAME_ALIASES
+
+    aliases = {
+        canonicalise_title_fragment(title.rsplit(":", 1)[-1])
+        for title in template_titles.split("|")
+        if canonicalise_title_fragment(title.rsplit(":", 1)[-1])
+    }
+    return frozenset(aliases) if aliases else DEFAULT_TEMPLATE_NAME_ALIASES
+
+
 def split_isbn_prefixed_label(label: str) -> str | None:
     text = label.strip()
     if len(text) <= 4:
@@ -140,17 +153,20 @@ def get_template_param_by_name(template: Any, target_name: str) -> Any | None:
 
 
 def is_cite_book_template(template: Any) -> bool:
-    return str(template.name).strip().casefold() == "cite book"
+    return canonicalise_title_fragment(str(template.name)) == "citebook"
 
 
 def normalise_cite_book_isbn_templates(
     code: Any,
     groups: list[Group],
     convert_10_to_13: bool,
+    template_name_aliases: frozenset[str],
 ) -> int:
     changed = 0
     templates_found = list(
-        code.filter_templates(matches=is_cite_book_template))
+        code.filter_templates(
+            matches=lambda template: canonicalise_title_fragment(
+                str(template.name)) in template_name_aliases))
 
     for template in templates_found:
         isbn_param = get_template_param_by_name(template, "isbn")
@@ -264,15 +280,18 @@ def normalise_isbn_templates(
     xml_path: Path,
     convert_10_to_13: bool = False,
     rehyphenate_equal_label: bool = False,
+    template_titles: str | None = None,
 ) -> tuple[str, int]:
     groups = load_groups(xml_path)
     changed = 0
+    template_name_aliases = parse_template_name_aliases(template_titles)
 
     code = mwparserfromhell.parse(text)
     changed += normalise_cite_book_isbn_templates(
         code,
         groups,
         convert_10_to_13,
+        template_name_aliases,
     )
     changed += replace_booksource_links_with_isbn_templates(
         code,
@@ -280,12 +299,10 @@ def normalise_isbn_templates(
         convert_10_to_13,
     )
     templates_found = list(
-        code.filter_templates(
-            matches=lambda t: str(t.name).strip().lower() == "isbn"))
+        code.filter_templates(matches=lambda t: canonicalise_title_fragment(
+            str(t.name)) in template_name_aliases))
 
     for template in templates_found:
-        template.name = "ISBN"
-
         if not template.has("1"):
             continue
 
