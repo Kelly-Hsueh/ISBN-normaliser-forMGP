@@ -547,6 +547,7 @@ def edit_page_text(
         "summary": summary,
         "token": csrf_token,
         "tags": "Bot",
+        "minor": 1,
     }
     if bot:
         data["bot"] = "1"
