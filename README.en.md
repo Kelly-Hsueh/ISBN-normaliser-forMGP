@@ -18,6 +18,7 @@ A standalone normalisation tool and MediaWiki bot for the {{[ISBN](https://mzh.m
   - Optional: When parameter 1 and 2 are semantically identical, replace the template with `{{ISBNT|$1}}`, where `$1` is the hyphenated ISBN
 
 - **mw_isbn_bot.py** — MediaWiki bot runtime
+  - Supports multiple page fetch strategies (selected via `--query` / `-q`)
   - Fetch pages transcluding Template:ISBN and their revisions in a single `generator=transcludedin` query
   - Automatic pagination via API continue and revision version continuation (rvcontinue)
   - Detect and log API size limit warnings while continuing to fetch remaining data
@@ -46,8 +47,8 @@ pip install requests brotli mwparserfromhell
 ## Quick Start
 
 ```bash
-git clone https://github.com/kelly/ISBN-normaliser.git
-cd ISBN-normaliser
+git clone https://github.com/Kelly-Hsueh/ISBN-normaliser-forMGP.git
+cd ISBN-normaliser-forMGP
 python -m pip install --upgrade pip
 pip install requests brotli mwparserfromhell
 ```
@@ -95,23 +96,37 @@ python isbn_template_normalise.py \
 
 ### MediaWiki Bot
 
-**Local execution** (requires `.env` file or command-line arguments):
+Once `.env.pwd` is configured (see below), you only need:
+
+```bash
+# Dry run (test without saving)
+python mw_isbn_bot.py --dry-run
+
+# Live run with edit limit
+python mw_isbn_bot.py --max-edits 10
+
+# Specify a fetch strategy
+python mw_isbn_bot.py -q ti --dry-run         # transcludedin, short form
+python mw_isbn_bot.py -q booksource-search    # booksource-search (planned)
+```
+
+Credentials can also be passed directly on the command line (not recommended for regular use):
+
 ```bash
 python mw_isbn_bot.py \
-  --wiki-api https://example.org/api.php \
   --bot-username MyBot \
   --bot-password MyBotPassword \
   --max-edits 10
 ```
 
-**Dry run** (test without saving):
-```bash
-python mw_isbn_bot.py \
-  --wiki-api https://example.org/api.php \
-  --bot-username MyBot \
-  --bot-password MyBotPassword \
-  --dry-run
-```
+#### Fetch Strategies (`--query` / `-q`)
+
+| Value | Alias | Description |
+|-------|-------|-------------|
+| `transcludedin` | `ti` | Fetch all pages transcluding Template:ISBN (default) |
+| `booksource-search` | `booksource`, `bs` | Full-text search for pages containing `Special:BookSources/` links (planned) |
+
+The default strategy is controlled by `DEFAULT_QUERY` in `.env`, falling back to `transcludedin` if unset.
 
 ## GitHub Actions Automation
 
@@ -120,12 +135,24 @@ python mw_isbn_bot.py \
 File: `.github/workflows/isbn-normaliser-bot.yml`
 
 1. **Manual trigger (workflow_dispatch)**
-  - Optional `max_edits` input to limit edits in this run
+  - `query` — Fetch strategy (leave empty to use `DEFAULT_QUERY` from `.env`)
+  - `dry_run` — Whether to run without saving edits
+  - `max_edits` — Edit count limit for this run (leave empty for unlimited)
   - Open the Actions tab and click "Run workflow"
 
 2. **Scheduled execution (optional)**
   - `schedule` is currently commented out and can be enabled if needed
   - Planned time: UTC `20:15` (cron: `15 20 * * *`)
+
+3. **Running multiple strategies (optional)**
+  - Use a GHA matrix to run strategies in parallel:
+    ```yaml
+    strategy:
+      matrix:
+        query: [transcludedin, booksource-search]
+    steps:
+      - run: python mw_isbn_bot.py --query ${{ matrix.query }}
+    ```
 
 ### 2) RangeMessage Auto-update Workflow
 
@@ -160,6 +187,15 @@ File: `.github/workflows/update-rangemessage.yml`
   - ISBN range rule source file
   - Published by the International ISBN Agency and used by the normalisation logic
 
+- `.env`:
+  - Public configuration (wiki URL, user-agent, template names, default query strategy); version-controlled
+
+- `.env.pwd`:
+  - Private bot credentials (username and password); listed in `.gitignore`, **never committed**
+
+- `.env.pwd.example`:
+  - Template for `.env.pwd`; version-controlled
+
 - `.github/workflows/isbn-normaliser-bot.yml`:
   - Bot execution workflow (manual trigger, optional schedule)
 
@@ -168,20 +204,59 @@ File: `.github/workflows/update-rangemessage.yml`
 
 ## Environment Configuration
 
-Set in `.env` or GitHub Secrets:
+The project uses a two-file configuration scheme to separate public settings from private credentials:
+
+| File | Version-controlled | Purpose |
+|------|--------------------|---------|
+| `.env` | ✅ Committed | Wiki URL, user-agent, template names, default query strategy |
+| `.env.pwd` | ❌ Listed in `.gitignore` | Bot credentials (username and password) |
+
+### `.env` (public, ships with the repository)
+
+The repository already contains defaults for MoegirlPedia:
+
+```ini
+WIKI_API=https://mzh.moegirl.org.cn/api.php
+USER_AGENT=ISBNNormaliser-Bot/1.1 (...)
+TEMPLATE_TITLE=Template:ISBN|Template:ISBNT|Template:Cite book
+DEFAULT_QUERY=transcludedin
+XML_PATH=RangeMessage.xml
+REHYPHENATE_EQUAL_LABEL=false
+TO13=false
+SUMMARY=根据 ISO 2108:2017（...）自动调整ISBN（...）
+```
+
+| Variable | CLI flag | Description |
+|----------|----------|-------------|
+| `WIKI_API` | `--wiki-api` | MediaWiki API endpoint |
+| `USER_AGENT` | `--user-agent` | HTTP User-Agent string |
+| `TEMPLATE_TITLE` | `--template-title` | Template name(s), `|`-separated |
+| `DEFAULT_QUERY` | `--query` / `-q` | Default fetch strategy |
+| `XML_PATH` | `--xml` | Path to RangeMessage.xml |
+| `REHYPHENATE_EQUAL_LABEL` | `--rehyphenate-equal-label` | Merge semantically equal params into ISBNT |
+| `TO13` | `-to13` | Convert ISBN-10 to ISBN-13 |
+| `SUMMARY` | `--summary` | Edit summary text |
+
+To adapt to a different wiki, edit this file and commit the change. All fields can be overridden temporarily via the corresponding CLI flag.
+
+### `.env.pwd` (private, local/server use only)
+
+Copy `.env.pwd.example` and fill in real values:
+
+```ini
+BOT_USERNAME=YourBot@BotPassword
+BOT_PASSWORD=your_bot_password_here
+```
+
+### GitHub Actions
+
+Only `BOT_USERNAME` and `BOT_PASSWORD` need to be added to GitHub Secrets. Public configuration is carried in by `actions/checkout` automatically — no extra steps required.
+
+### Priority
 
 ```
-BOT_USERNAME=YourBotName
-BOT_PASSWORD=YourBotPassword
+CLI flag > system env var (including GHA env: injection) > .env.pwd > .env > built-in default
 ```
-
-Default values:
-- `WIKI_API` — Built-in default is `https://mzh.moegirl.org.cn/api.php`
-- `USER_AGENT` — Built-in default is `ISBNNormaliserBot/1.0 (...)`
-
-Notes:
-- Current version only loads `BOT_USERNAME` and `BOT_PASSWORD` from `.env`
-- Other runtime options (such as `--max-edits`, `--dry-run`, `--to13`) should be passed by command-line flags
 
 ## Normalization Rules
 
@@ -197,6 +272,9 @@ Notes:
 
 - `RangeMessage.xml` not found:
   - Ensure the file exists in the current directory, or pass the correct path using `--xml`
+
+- `BOT_USERNAME` / `BOT_PASSWORD` missing:
+  - Ensure `.env.pwd` exists and is filled in, or pass `--bot-username` / `--bot-password` on the command line
 
 - Bot does not make edits:
   - Run with `--dry-run` first and check whether candidate pages are detected

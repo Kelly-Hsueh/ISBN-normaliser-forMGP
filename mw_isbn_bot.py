@@ -9,7 +9,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import brotli
 import requests
@@ -24,24 +24,43 @@ DEFAULT_USER_AGENT = (
     "(https://github.com/kelly/ISBN-normaliser; 75931686+Kelly-Hsueh@users.noreply.github.com) "
     "requests/2.33.x")
 DEFAULT_WIKI_API = "https://mzh.moegirl.org.cn/api.php"
+_FALLBACK_TEMPLATE_TITLE = "Template:ISBN|Template:ISBNT|Template:Cite book"
+_FALLBACK_XML_PATH = "RangeMessage.xml"
+_DEFAULT_SUMMARY = (
+    "根据 ISO 2108:2017（https://www.iso.org/standard/65483.html ）自动"
+    "调整ISBN（若阁下对此次修改感到疑惑，可以前往 https://grp.isbn-international.org/"
+    " 查找出版社前缀信息）")
+
+# Hardcoded operational constants — not exposed as CLI flags or env vars.
+_MAXLAG: int = 3
+_TIMEOUT: int = 30
+_EDIT_INTERVAL: float = 0.2
+_USE_BOT_FLAG: bool = True
 
 # Debug-only override: when non-empty, only these pageids are fetched and processed.
 # Example: DEBUG_TARGET_PAGEIDS = [12345, 67890]
 DEBUG_TARGET_PAGEIDS: list[int] = []
 
+# Query strategy registry.  Values are canonical names; keys include short aliases.
+QUERY_ALIASES: dict[str, str] = {
+    "transcludedin": "transcludedin",
+    "ti": "transcludedin",
+    "booksource-search": "booksource-search",
+    "booksource": "booksource-search",
+    "bs": "booksource-search",
+}
 
-def parse_bool_env(raw_value: str, *, default: bool) -> bool:
-    value = raw_value.strip().lower()
-    if not value:
-        return default
-    if value == "true":
-        return True
-    if value == "false":
-        return False
-    raise RuntimeError("Only true/false or empty is supported.")
+# ---------------------------------------------------------------------------
+# Environment loading
+# ---------------------------------------------------------------------------
 
 
-def load_env_file(env_path: str = ".env") -> None:
+def load_env_file(env_path: str) -> None:
+    """Load key=value pairs from *env_path* into os.environ via setdefault.
+
+    setdefault means: values already present in os.environ (e.g. injected by
+    GitHub Actions via ``env:``) are never overwritten.
+    """
     path = Path(env_path)
     if not path.exists() or not path.is_file():
         return
@@ -62,6 +81,45 @@ def load_env_file(env_path: str = ".env") -> None:
             value = value[1:-1]
 
         os.environ.setdefault(key, value)
+
+
+def load_env_files() -> None:
+    """Load both env files with the correct priority order.
+
+    Priority (highest → lowest):
+      1. Variables already in os.environ  (e.g. GHA ``env:`` injection)
+      2. .env.pwd                       (private credentials, gitignored)
+      3. .env                             (public config, version-controlled)
+
+    Because load_env_file uses setdefault, loading .env.pwd *before* .env
+    ensures .env.pwd values survive the subsequent .env load.
+    """
+    load_env_file(".env.pwd")
+    load_env_file(".env")
+
+
+def _parse_bool_env(key: str, *, default: bool) -> bool:
+    """Read a boolean value from os.environ[key].
+
+    Accepts: 1/true/yes (case-insensitive) → True,
+             0/false/no  (case-insensitive) → False,
+             absent / empty                 → *default*.
+    """
+    raw = os.environ.get(key, "").strip().lower()
+    if not raw:
+        return default
+    if raw in ("1", "true", "yes"):
+        return True
+    if raw in ("0", "false", "no"):
+        return False
+    raise RuntimeError(
+        f"Environment variable {key!r} must be true/false/1/0/yes/no, got {raw!r}."
+    )
+
+
+# ---------------------------------------------------------------------------
+# HTTP helpers
+# ---------------------------------------------------------------------------
 
 
 def safe_get_json(response: requests.Response) -> dict[str, Any]:
@@ -131,11 +189,14 @@ def api_post_json(
         raise RuntimeError(f"{error_context}: {exc}") from exc
 
 
+# ---------------------------------------------------------------------------
+# MediaWiki auth
+# ---------------------------------------------------------------------------
+
+
 def get_login_token(
     session: requests.Session,
     wiki_api: str,
-    timeout: int,
-    max_lag: int,
 ) -> str:
     data = api_get_json(
         session=session,
@@ -145,9 +206,9 @@ def get_login_token(
             "meta": "tokens",
             "type": "login",
             "format": "json",
-            "maxlag": max_lag,
+            "maxlag": _MAXLAG,
         },
-        timeout=timeout,
+        timeout=_TIMEOUT,
         error_context="Failed to fetch login token",
     )
     token = data.get("query", {}).get("tokens", {}).get("logintoken")
@@ -166,15 +227,8 @@ def login_with_bot_password(
     wiki_api: str,
     bot_username: str,
     bot_password: str,
-    timeout: int,
-    max_lag: int,
 ) -> None:
-    login_token = get_login_token(
-        session=session,
-        wiki_api=wiki_api,
-        timeout=timeout,
-        max_lag=max_lag,
-    )
+    login_token = get_login_token(session=session, wiki_api=wiki_api)
 
     result = api_post_json(
         session=session,
@@ -185,9 +239,9 @@ def login_with_bot_password(
             "lgpassword": bot_password,
             "lgtoken": login_token,
             "format": "json",
-            "maxlag": max_lag,
+            "maxlag": _MAXLAG,
         },
-        timeout=timeout,
+        timeout=_TIMEOUT,
         error_context="Login request failed",
     )
     if result.get("login", {}).get("result") != "Success":
@@ -197,8 +251,6 @@ def login_with_bot_password(
 def get_csrf_token(
     session: requests.Session,
     wiki_api: str,
-    timeout: int,
-    max_lag: int,
     assert_user: str,
 ) -> str:
     data = api_get_json(
@@ -209,15 +261,20 @@ def get_csrf_token(
             "meta": "tokens",
             "format": "json",
             "assertuser": assert_user,
-            "maxlag": max_lag,
+            "maxlag": _MAXLAG,
         },
-        timeout=timeout,
+        timeout=_TIMEOUT,
         error_context="Failed to fetch CSRF token",
     )
     token = data.get("query", {}).get("tokens", {}).get("csrftoken")
     if not isinstance(token, str) or not token:
         raise RuntimeError(f"CSRF token missing: {data}")
     return token
+
+
+# ---------------------------------------------------------------------------
+# Page content helpers
+# ---------------------------------------------------------------------------
 
 
 def allowbots(text: str, user: str) -> bool:
@@ -268,12 +325,15 @@ def _merge_generated_pages_with_revisions(
         pages_by_id[pageid] = merged
 
 
+# ---------------------------------------------------------------------------
+# Query strategies
+# ---------------------------------------------------------------------------
+
+
 def fetch_transcluded_pages_with_revisions(
     session: requests.Session,
     wiki_api: str,
     template_title: str,
-    timeout: int,
-    max_lag: int,
 ) -> tuple[list[int], dict[int, dict[str, Any]], str]:
     pageids: list[int] = []
     seen: set[int] = set()
@@ -283,7 +343,7 @@ def fetch_transcluded_pages_with_revisions(
     request_data: dict[str, Any] = {
         "action": "query",
         "format": "json",
-        "maxlag": max_lag,
+        "maxlag": _MAXLAG,
         "prop": "revisions",
         "titles": template_title,
         "generator": "transcludedin",
@@ -299,7 +359,7 @@ def fetch_transcluded_pages_with_revisions(
             session=session,
             wiki_api=wiki_api,
             data=request_data,
-            timeout=timeout,
+            timeout=_TIMEOUT,
             error_context="Failed to fetch transcluded pages with revisions",
         )
         if "error" in response_data:
@@ -307,7 +367,6 @@ def fetch_transcluded_pages_with_revisions(
                 f"API error on transcluded revisions query: {response_data['error']}"
             )
 
-        # Check for API limits/truncation warnings
         if warnings := response_data.get("warnings", {}).get("result", {}):
             if warning_msg := warnings.get("warnings", ""):
                 print(f"[API WARNING] {warning_msg}", file=sys.stderr)
@@ -331,12 +390,32 @@ def fetch_transcluded_pages_with_revisions(
     return pageids, pages_by_id, curtimestamp
 
 
+def _fetch_by_booksource_search(
+    session: requests.Session,
+    wiki_api: str,
+    template_title: str,
+) -> tuple[list[int], dict[int, dict[str, Any]], str]:
+    raise NotImplementedError(
+        "booksource-search query strategy is not yet implemented. "
+        "Use --query transcludedin (or -q ti) for now.")
+
+
+# Callable type alias for query strategy functions.
+_FetchFn = Callable[
+    [requests.Session, str, str],
+    tuple[list[int], dict[int, dict[str, Any]], str],
+]
+
+_QUERY_STRATEGIES: dict[str, _FetchFn] = {
+    "transcludedin": fetch_transcluded_pages_with_revisions,
+    "booksource-search": _fetch_by_booksource_search,
+}
+
+
 def fetch_pages_by_pageids_with_revisions(
     session: requests.Session,
     wiki_api: str,
     pageids: list[int],
-    timeout: int,
-    max_lag: int,
 ) -> tuple[list[int], dict[int, dict[str, Any]], str]:
     target_ids = [pid for pid in pageids if isinstance(pid, int) and pid > 0]
     if not target_ids:
@@ -346,7 +425,6 @@ def fetch_pages_by_pageids_with_revisions(
     pages_by_id: dict[int, dict[str, Any]] = {}
     curtimestamp = ""
 
-    # MediaWiki API accepts multiple pageids split by '|'. Keep chunks modest.
     chunk_size = 50
     for i in range(0, len(target_ids), chunk_size):
         chunk = target_ids[i:i + chunk_size]
@@ -357,14 +435,14 @@ def fetch_pages_by_pageids_with_revisions(
                 "action": "query",
                 "format": "json",
                 "formatversion": 2,
-                "maxlag": max_lag,
+                "maxlag": _MAXLAG,
                 "prop": "revisions",
                 "pageids": "|".join(str(pid) for pid in chunk),
                 "rvprop": "content|ids",
                 "rvslots": "main",
                 "curtimestamp": 1,
             },
-            timeout=timeout,
+            timeout=_TIMEOUT,
             error_context="Failed to fetch pages by pageid with revisions",
         )
         if "error" in response_data:
@@ -392,9 +470,13 @@ def fetch_pages_by_pageids_with_revisions(
 
             pages_by_id[pageid] = page
 
-    # Keep caller-provided order, but only for pages successfully fetched.
     ordered = [pid for pid in target_ids if pid in pages_by_id]
     return ordered, pages_by_id, curtimestamp
+
+
+# ---------------------------------------------------------------------------
+# Page processing
+# ---------------------------------------------------------------------------
 
 
 def extract_main_content(page: dict[str, Any]) -> str | None:
@@ -456,10 +538,7 @@ def resolve_template_aliases(
     session: requests.Session,
     wiki_api: str,
     template_titles: str | None,
-    timeout: int,
-    max_lag: int,
 ) -> dict[str, str]:
-    # Start with user-provided preferred names as seeds (if any).
     preferred: dict[str, str] = {}
     if template_titles:
         for title in template_titles.split("|"):
@@ -469,7 +548,6 @@ def resolve_template_aliases(
             if key := canonicalise_title_fragment(frag):
                 preferred.setdefault(key, frag)
     if not template_titles:
-        # No user-provided names; we'll still try to build mapping from API.
         preferred = {}
 
     try:
@@ -485,7 +563,7 @@ def resolve_template_aliases(
                 "formatversion": "2",
                 "rdprop": "title",
             },
-            timeout=timeout,
+            timeout=_TIMEOUT,
             error_context="Failed to resolve template redirects",
         )
     except Exception:
@@ -505,8 +583,6 @@ def resolve_template_aliases(
         if not page_frag:
             continue
         page_key = canonicalise_title_fragment(page_frag)
-        # If user already specified a preferred name for this key, keep it;
-        # otherwise use the API page title fragment as preferred.
         preferred.setdefault(page_key, page_frag)
 
         for rd in page.get("redirects", []) or []:
@@ -517,7 +593,6 @@ def resolve_template_aliases(
             if not rd_frag:
                 continue
             rd_key = canonicalise_title_fragment(rd_frag)
-            # Map redirect canonical -> page's preferred (unless user overrode)
             preferred.setdefault(rd_key, preferred.get(page_key, page_frag))
 
     return preferred
@@ -529,8 +604,6 @@ def edit_page_text(
     pageid: int,
     text: str,
     summary: str,
-    timeout: int,
-    max_lag: int,
     csrf_token: str,
     assert_user: str,
     bot: bool,
@@ -540,7 +613,7 @@ def edit_page_text(
     data: dict[str, Any] = {
         "action": "edit",
         "format": "json",
-        "maxlag": max_lag,
+        "maxlag": _MAXLAG,
         "assertuser": assert_user,
         "pageid": str(pageid),
         "text": text,
@@ -560,7 +633,7 @@ def edit_page_text(
         session=session,
         wiki_api=wiki_api,
         data=data,
-        timeout=timeout,
+        timeout=_TIMEOUT,
         error_context=f"Failed to edit pageid={pageid}",
     )
     if "error" in result:
@@ -573,109 +646,6 @@ def edit_page_text(
     return result
 
 
-def parse_runtime_config(
-        args: argparse.Namespace) -> tuple[str, str, str, str]:
-    wiki_api = args.wiki_api or DEFAULT_WIKI_API
-    bot_username = (args.bot_username
-                    or os.environ.get("BOT_USERNAME", "")).strip()
-    bot_password = (args.bot_password
-                    or os.environ.get("BOT_PASSWORD", "")).strip()
-    user_agent = args.user_agent or DEFAULT_USER_AGENT
-
-    if not wiki_api:
-        raise RuntimeError("WIKI_API is required (flag or environment).")
-    if not bot_username:
-        raise RuntimeError("BOT_USERNAME is required (flag or environment).")
-    if not bot_password:
-        raise RuntimeError("BOT_PASSWORD is required (flag or environment).")
-
-    return wiki_api, bot_username, bot_password, user_agent
-
-
-def validate_xml_path(xml_arg: str) -> Path:
-    xml_path = Path(xml_arg)
-    if not xml_path.exists():
-        raise RuntimeError(f"XML file not found: {xml_path}")
-    return xml_path
-
-
-def run_normalization_workflow(
-    args: argparse.Namespace,
-    session: requests.Session,
-    wiki_api: str,
-    bot_username: str,
-    bot_password: str,
-    xml_path: Path,
-    use_bot_flag: bool,
-) -> int:
-    login_with_bot_password(
-        session=session,
-        wiki_api=wiki_api,
-        bot_username=bot_username,
-        bot_password=bot_password,
-        timeout=args.timeout,
-        max_lag=args.maxlag,
-    )
-    assert_user = normalise_assert_user(bot_username)
-    csrf_token = get_csrf_token(
-        session=session,
-        wiki_api=wiki_api,
-        timeout=args.timeout,
-        max_lag=args.maxlag,
-        assert_user=assert_user,
-    )
-
-    # Resolve template aliases via the API so we use site-aware preferred names
-    template_preferred_map = resolve_template_aliases(
-        session=session,
-        wiki_api=wiki_api,
-        template_titles=args.template_title,
-        timeout=args.timeout,
-        max_lag=args.maxlag,
-    )
-
-    if DEBUG_TARGET_PAGEIDS:
-        pageids, pages_by_id, curtimestamp = (
-            fetch_pages_by_pageids_with_revisions(
-                session=session,
-                wiki_api=wiki_api,
-                pageids=DEBUG_TARGET_PAGEIDS,
-                timeout=args.timeout,
-                max_lag=args.maxlag,
-            ))
-        print("Fetched pages with revisions (test pageids): "
-              f"{len(pages_by_id)}")
-    else:
-        pageids, pages_by_id, curtimestamp = (
-            fetch_transcluded_pages_with_revisions(
-                session=session,
-                wiki_api=wiki_api,
-                template_title=args.template_title,
-                timeout=args.timeout,
-                max_lag=args.maxlag,
-            ))
-        print(f"Fetched pages with revisions: {len(pages_by_id)}")
-
-    processed, skipped_bots, changed, failed = process_pages(
-        args=args,
-        session=session,
-        wiki_api=wiki_api,
-        bot_username=bot_username,
-        xml_path=xml_path,
-        pageids=pageids,
-        pages_by_id=pages_by_id,
-        csrf_token=csrf_token,
-        use_bot_flag=use_bot_flag,
-        start_timestamp=curtimestamp,
-        template_preferred_map=template_preferred_map,
-    )
-
-    result_msg = (f"Done. processed={processed}, changed={changed}, "
-                  f"skipped_bots={skipped_bots}, failed={failed}")
-    print(result_msg)
-    return 0 if failed == 0 else 2
-
-
 def _try_apply_changes(
     session: requests.Session,
     wiki_api: str,
@@ -686,13 +656,12 @@ def _try_apply_changes(
     args: argparse.Namespace,
     csrf_token: str,
     assert_user: str,
-    use_bot_flag: bool,
     baserevid: str,
     start_timestamp: str,
 ) -> tuple[bool, bool]:
     """Apply changes to page (dry-run or real edit).
 
-    Returns: (changed_count_incremented, should_fail)
+    Returns: (changed_flag, failed_flag)
     """
     if args.dry_run:
         print(
@@ -707,18 +676,16 @@ def _try_apply_changes(
             pageid=pageid,
             text=new_text,
             summary=args.summary,
-            timeout=args.timeout,
-            max_lag=args.maxlag,
             csrf_token=csrf_token,
             assert_user=assert_user,
-            bot=use_bot_flag,
+            bot=_USE_BOT_FLAG,
             baserevid=baserevid,
             starttimestamp=start_timestamp,
         )
         print(
             f"[EDITED] pageid={pageid} title={title} replacements={replacements}"
         )
-        time.sleep(args.edit_interval)
+        time.sleep(_EDIT_INTERVAL)
         return True, False
     except RuntimeError as exc:
         if "editconflict" not in str(exc):
@@ -742,7 +709,6 @@ def process_pages(
     pageids: list[int],
     pages_by_id: dict[int, dict[str, Any]],
     csrf_token: str,
-    use_bot_flag: bool,
     start_timestamp: str = "",
     template_preferred_map: dict[str, str] | None = None,
 ) -> tuple[int, int, int, int]:
@@ -796,7 +762,6 @@ def process_pages(
             args=args,
             csrf_token=csrf_token,
             assert_user=assert_user,
-            use_bot_flag=use_bot_flag,
             baserevid=baserevid,
             start_timestamp=start_timestamp,
         )
@@ -808,17 +773,143 @@ def process_pages(
     return processed, skipped_bots, changed, failed
 
 
+# ---------------------------------------------------------------------------
+# Runtime config & workflow
+# ---------------------------------------------------------------------------
+
+
+def parse_runtime_config(
+        args: argparse.Namespace) -> tuple[str, str, str, str]:
+    """Resolve runtime config with priority: CLI flag > env var > built-in default."""
+    wiki_api = args.wiki_api or os.environ.get("WIKI_API", DEFAULT_WIKI_API)
+    bot_username = (args.bot_username
+                    or os.environ.get("BOT_USERNAME", "")).strip()
+    bot_password = (args.bot_password
+                    or os.environ.get("BOT_PASSWORD", "")).strip()
+    user_agent = args.user_agent or os.environ.get("USER_AGENT",
+                                                   DEFAULT_USER_AGENT)
+
+    if not wiki_api:
+        raise RuntimeError(
+            "WIKI_API is required (--wiki-api flag, or WIKI_API in .env).")
+    if not bot_username:
+        raise RuntimeError(
+            "BOT_USERNAME is required (--bot-username flag, or BOT_USERNAME in .env.pwd)."
+        )
+    if not bot_password:
+        raise RuntimeError(
+            "BOT_PASSWORD is required (--bot-password flag, or BOT_PASSWORD in .env.pwd)."
+        )
+
+    return wiki_api, bot_username, bot_password, user_agent
+
+
+def validate_xml_path(xml_arg: str) -> Path:
+    xml_path = Path(xml_arg)
+    if not xml_path.exists():
+        raise RuntimeError(f"XML file not found: {xml_path}")
+    return xml_path
+
+
+def run_normalization_workflow(
+    args: argparse.Namespace,
+    session: requests.Session,
+    wiki_api: str,
+    bot_username: str,
+    bot_password: str,
+    xml_path: Path,
+) -> int:
+    login_with_bot_password(
+        session=session,
+        wiki_api=wiki_api,
+        bot_username=bot_username,
+        bot_password=bot_password,
+    )
+    assert_user = normalise_assert_user(bot_username)
+    csrf_token = get_csrf_token(
+        session=session,
+        wiki_api=wiki_api,
+        assert_user=assert_user,
+    )
+
+    template_preferred_map = resolve_template_aliases(
+        session=session,
+        wiki_api=wiki_api,
+        template_titles=args.template_title,
+    )
+
+    if DEBUG_TARGET_PAGEIDS:
+        pageids, pages_by_id, curtimestamp = fetch_pages_by_pageids_with_revisions(
+            session=session,
+            wiki_api=wiki_api,
+            pageids=DEBUG_TARGET_PAGEIDS,
+        )
+        print(
+            f"Fetched pages with revisions (debug pageids): {len(pages_by_id)}"
+        )
+    else:
+        fetch_fn = _QUERY_STRATEGIES[args.query]
+        pageids, pages_by_id, curtimestamp = fetch_fn(
+            session,
+            wiki_api,
+            args.template_title,
+        )
+        print(f"Fetched pages ({args.query}): {len(pages_by_id)}")
+
+    processed, skipped_bots, changed, failed = process_pages(
+        args=args,
+        session=session,
+        wiki_api=wiki_api,
+        bot_username=bot_username,
+        xml_path=xml_path,
+        pageids=pageids,
+        pages_by_id=pages_by_id,
+        csrf_token=csrf_token,
+        start_timestamp=curtimestamp,
+        template_preferred_map=template_preferred_map,
+    )
+
+    result_msg = (f"Done. processed={processed}, changed={changed}, "
+                  f"skipped_bots={skipped_bots}, failed={failed}")
+    print(result_msg)
+    return 0 if failed == 0 else 2
+
+
 def execute(args: argparse.Namespace) -> int:
     try:
-        load_env_file()
+        load_env_files()
+
+        # Resolve query strategy: CLI arg > DEFAULT_QUERY env var > 'transcludedin'
+        if args.query is None:
+            args.query = os.environ.get("DEFAULT_QUERY", "transcludedin")
+        if args.query not in QUERY_ALIASES:
+            valid = ", ".join(sorted(set(QUERY_ALIASES.values())))
+            raise RuntimeError(
+                f"Unknown query strategy: {args.query!r}. Valid: {valid}")
+        args.query = QUERY_ALIASES[args.query]
+
+        # Resolve env-backed optional CLI args.
+        # Boolean flags: CLI flag (True) wins; otherwise fall back to env var.
+        if not args.to13:
+            args.to13 = _parse_bool_env("TO13", default=False)
+        if not args.rehyphenate_equal_label:
+            args.rehyphenate_equal_label = _parse_bool_env(
+                "REHYPHENATE_EQUAL_LABEL", default=False)
+
+        # String args: non-empty CLI value wins; otherwise env var; then built-in default.
+        if not args.template_title:
+            args.template_title = os.environ.get("TEMPLATE_TITLE",
+                                                 _FALLBACK_TEMPLATE_TITLE)
+        if not args.xml:
+            args.xml = os.environ.get("XML_PATH", _FALLBACK_XML_PATH)
+        if not args.summary:
+            args.summary = os.environ.get("SUMMARY", _DEFAULT_SUMMARY)
 
         wiki_api, bot_username, bot_password, user_agent = parse_runtime_config(
             args)
         xml_path = validate_xml_path(args.xml)
-
-        use_bot_flag = parse_bool_env(str(args.bot_flag), default=True)
-
         session = build_session(user_agent)
+
         return run_normalization_workflow(
             args=args,
             session=session,
@@ -826,15 +917,15 @@ def execute(args: argparse.Namespace) -> int:
             bot_username=bot_username,
             bot_password=bot_password,
             xml_path=xml_path,
-            use_bot_flag=use_bot_flag,
         )
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
 
-def main() -> int:
-    return execute(build_parser().parse_args())
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -842,72 +933,65 @@ def build_parser() -> argparse.ArgumentParser:
         description="MediaWiki runner for ISBN template normalization.")
     parser.add_argument(
         "--xml",
-        default="RangeMessage.xml",
-        help="Path to ISBNRangeMessage XML file.",
+        default=None,
+        help="Path to ISBNRangeMessage XML file. Overrides XML_PATH in .env.",
     )
     parser.add_argument(
         "-to13",
         "--to13",
         action="store_true",
-        help="Convert ISBN-10 template values to ISBN-13 before output.",
+        default=False,
+        help="Convert ISBN-10 template values to ISBN-13 before output. "
+        "Overrides TO13 in .env.",
     )
     parser.add_argument(
         "--rehyphenate-equal-label",
         action="store_true",
+        default=False,
         help=(
             "When template param1 and param2 are semantically the same ISBN, "
             "replace the template with {{ISBNT|$1}} and keep parameter 1 "
-            "hyphenated."),
+            "hyphenated. Overrides REHYPHENATE_EQUAL_LABEL in .env."),
+    )
+    parser.add_argument(
+        "--query",
+        "-q",
+        choices=list(QUERY_ALIASES),
+        metavar="{transcludedin|ti|booksource-search|booksource|bs}",
+        default=None,
+        help="Page fetch strategy. "
+        "Default: DEFAULT_QUERY env var (from .env), or 'transcludedin' if unset.",
     )
     parser.add_argument(
         "--wiki-api",
-        help="MediaWiki API endpoint, e.g. https://example.org/api.php",
+        default=None,
+        help="MediaWiki API endpoint. Overrides WIKI_API in .env.",
     )
     parser.add_argument(
         "--bot-username",
-        help="Bot username for login.",
+        default=None,
+        help="Bot username. Overrides BOT_USERNAME in .env.pwd.",
     )
     parser.add_argument(
         "--bot-password",
-        help="Bot password for login.",
+        default=None,
+        help="Bot password. Overrides BOT_PASSWORD in .env.pwd.",
     )
     parser.add_argument(
         "--user-agent",
-        help="HTTP User-Agent used by the bot.",
+        default=None,
+        help="HTTP User-Agent. Overrides USER_AGENT in .env.",
     )
     parser.add_argument(
         "--template-title",
-        default="Template:ISBN|Template:ISBNT|Template:Cite book",
-        help="Template title for transclusion lookup.",
+        default=None,
+        help="Template title(s) for transclusion lookup. "
+        "Overrides TEMPLATE_TITLE in .env.",
     )
     parser.add_argument(
         "--summary",
-        default="根据 ISO 2108:2017（https://www.iso.org/standard/65483.html ）自动"
-        "调整ISBN（若阁下对此次修改感到疑惑，可以前往 https://grp.isbn-international.org/ 查找出版社前缀信息）",
-        help="Edit summary used when saving pages.",
-    )
-    parser.add_argument(
-        "--maxlag",
-        type=int,
-        default=3,
-        help="MediaWiki maxlag value.",
-    )
-    parser.add_argument(
-        "--timeout",
-        type=int,
-        default=30,
-        help="HTTP timeout (seconds).",
-    )
-    parser.add_argument(
-        "--edit-interval",
-        type=float,
-        default=0.2,
-        help="Seconds to sleep between successful edits.",
-    )
-    parser.add_argument(
-        "--bot-flag",
-        default="true",
-        help="Whether to submit edit with bot=1 (true/false).",
+        default=None,
+        help="Edit summary used when saving pages. Overrides SUMMARY in .env.",
     )
     parser.add_argument(
         "--dry-run",
@@ -918,9 +1002,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-edits",
         type=int,
         default=None,
-        help="Maximum number of edits to perform. None means unlimited.",
+        help="Maximum number of edits to perform. Omit for unlimited.",
     )
     return parser
+
+
+def main() -> int:
+    return execute(build_parser().parse_args())
 
 
 if __name__ == "__main__":

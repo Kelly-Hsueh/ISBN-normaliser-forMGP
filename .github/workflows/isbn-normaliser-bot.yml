@@ -5,6 +5,15 @@ permissions:
 on:
   workflow_dispatch:
     inputs:
+      query:
+        description: "Page fetch strategy (empty = use DEFAULT_QUERY from .env)"
+        required: false
+        default: ""
+        type: choice
+        options:
+          - ""
+          - transcludedin
+          - booksource-search
       dry_run:
         description: "Run in dry-run mode (no edits will be saved)?"
         required: false
@@ -39,6 +48,9 @@ jobs:
           BOT_PASSWORD: ${{ secrets.BOT_PASSWORD }}
         run: |
           ARGS=""
+          if [ -n "${{ github.event.inputs.query }}" ]; then
+            ARGS="$ARGS --query ${{ github.event.inputs.query }}"
+          fi
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             ARGS="$ARGS --dry-run"
           fi

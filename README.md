@@ -18,7 +18,8 @@
   - 可选：当参数1和参数2语义相同时，将模板替换为 `{{ISBNT|$1}}`，其中 `$1` 为连字符化 ISBN
 
 - **mw_isbn_bot.py** — MediaWiki 机器人运行时
-  - 使用 `generator=transcludedin` 一次性拉取嵌入 Template:ISBN 的页面及其修订版本
+  - 支持多种页面查询策略（通过 `--query` / `-q` 选择）
+  - 使用 `generator=transcludedin` 拉取嵌入 Template:ISBN 的页面及其修订版本
   - 自动处理 API 分页（continue）和修订版本续取（rvcontinue）
   - 当 API 返回结果超过大小限制时，打印警告信息并继续拉取后续数据
   - 检查 Allowbots 规则后再编辑
@@ -46,8 +47,8 @@ pip install requests brotli mwparserfromhell
 ## 快速开始
 
 ```bash
-git clone https://github.com/kelly/ISBN-normaliser.git
-cd ISBN-normaliser
+git clone https://github.com/Kelly-Hsueh/ISBN-normaliser-forMGP.git
+cd ISBN-normaliser-forMGP
 python -m pip install --upgrade pip
 pip install requests brotli mwparserfromhell
 ```
@@ -95,23 +96,37 @@ python isbn_template_normalise.py \
 
 ### MediaWiki 机器人
 
-**本地运行（需要 .env 文件或命令行参数）：**
+配置好 `.env.pwd`（见下文）后，只需：
+
+```bash
+# 干运行（测试，不保存）
+python mw_isbn_bot.py --dry-run
+
+# 正式运行，限制编辑数量
+python mw_isbn_bot.py --max-edits 10
+
+# 指定查询方式
+python mw_isbn_bot.py -q ti --dry-run          # transcludedin，使用简写
+python mw_isbn_bot.py -q booksource-search     # booksource-search（计划中）
+```
+
+也可在命令行中临时覆盖凭据（不建议常用）：
+
 ```bash
 python mw_isbn_bot.py \
-  --wiki-api https://example.org/api.php \
   --bot-username MyBot \
   --bot-password MyBotPassword \
   --max-edits 10
 ```
 
-**干运行（测试不保存）：**
-```bash
-python mw_isbn_bot.py \
-  --wiki-api https://example.org/api.php \
-  --bot-username MyBot \
-  --bot-password MyBotPassword \
-  --dry-run
-```
+#### 查询策略（`--query` / `-q`）
+
+| 参数值 | 简写 | 说明 |
+|--------|------|------|
+| `transcludedin` | `ti` | 拉取所有嵌入 Template:ISBN 的页面（默认） |
+| `booksource-search` | `booksource`、`bs` | 通过全文检索找含 `Special:BookSources/` 链接的页面（计划中）|
+
+默认查询方式由 `.env` 中的 `DEFAULT_QUERY` 决定，未配置时回落到 `transcludedin`。
 
 ## GitHub Actions 自动化
 
@@ -120,12 +135,24 @@ python mw_isbn_bot.py \
 文件：`.github/workflows/isbn-normaliser-bot.yml`
 
 1. **手动触发（workflow_dispatch）**
-  - 可选输入 `max_edits` 来限制本次编辑数量
+  - `query` — 查询策略（留空则使用 `.env` 中的 `DEFAULT_QUERY`）
+  - `dry_run` — 是否仅干运行（不保存编辑）
+  - `max_edits` — 本次最多编辑数量（留空则不限）
   - 访问 Actions 标签页点击"运行工作流"
 
 2. **定时执行（可选）**
   - 当前 `schedule` 已注释，可按需取消注释启用
   - 计划时间为 UTC `20:15`（cron: `15 20 * * *`）
+
+3. **多策略并行（可选）**
+  - 如需同时运行多种查询策略，可在 GHA 中使用矩阵策略：
+    ```yaml
+    strategy:
+      matrix:
+        query: [transcludedin, booksource-search]
+    steps:
+      - run: python mw_isbn_bot.py --query ${{ matrix.query }}
+    ```
 
 ### 2) RangeMessage 自动更新工作流
 
@@ -160,6 +187,15 @@ python mw_isbn_bot.py \
   - ISBN 号段规则来源文件
   - 由国际 ISBN 中心发布，供规范化算法使用
 
+- `.env`：
+  - 公共配置（Wiki 地址、UA、模板名称、默认查询方式），纳入版本控制
+
+- `.env.pwd`：
+  - 私密凭据（Bot 用户名、密码），已在 `.gitignore` 中，**不提交**
+
+- `.env.pwd.example`：
+  - `.env.pwd` 的填写模板，纳入版本控制
+
 - `.github/workflows/isbn-normaliser-bot.yml`：
   - 机器人执行工作流（手动触发，可选定时）
 
@@ -168,20 +204,59 @@ python mw_isbn_bot.py \
 
 ## 环境变量配置
 
-在 `.env` 或 GitHub Secrets 中设置：
+项目采用双层配置方案，将公共设置与私密凭据分离：
+
+| 文件 | 是否纳入版本控制 | 用途 |
+|------|----------------|------|
+| `.env` | ✅ 提交到仓库 | Wiki 地址、UA、模板名称、默认查询方式 |
+| `.env.pwd` | ❌ 已在 `.gitignore` 中 | Bot 账号凭据 |
+
+### `.env`（公共，随仓库分发）
+
+仓库中已内置适配萌娘百科的默认值：
+
+```ini
+WIKI_API=https://mzh.moegirl.org.cn/api.php
+USER_AGENT=ISBNNormaliser-Bot/1.1 (...)
+TEMPLATE_TITLE=Template:ISBN|Template:ISBNT|Template:Cite book
+DEFAULT_QUERY=transcludedin
+XML_PATH=RangeMessage.xml
+REHYPHENATE_EQUAL_LABEL=false
+TO13=false
+SUMMARY=根据 ISO 2108:2017（...）自动调整ISBN（...）
+```
+
+| 变量 | 对应 CLI 参数 | 说明 |
+|------|-------------|------|
+| `WIKI_API` | `--wiki-api` | MediaWiki API 地址 |
+| `USER_AGENT` | `--user-agent` | HTTP User-Agent |
+| `TEMPLATE_TITLE` | `--template-title` | 模板名称（可多个，`\|` 分隔） |
+| `DEFAULT_QUERY` | `--query` / `-q` | 默认查询策略 |
+| `XML_PATH` | `--xml` | RangeMessage.xml 路径 |
+| `REHYPHENATE_EQUAL_LABEL` | `--rehyphenate-equal-label` | 语义相同时合并为 ISBNT |
+| `TO13` | `-to13` | 将 ISBN-10 转换为 ISBN-13 |
+| `SUMMARY` | `--summary` | 编辑摘要 |
+
+如需适配其他 wiki，修改后提交即可。所有字段均可通过对应命令行参数临时覆盖。
+
+### `.env.pwd`（私密，本地 / 服务器专用）
+
+复制 `.env.pwd.example` 并填写实际值：
+
+```ini
+BOT_USERNAME=YourBot@BotPassword
+BOT_PASSWORD=your_bot_password_here
+```
+
+### GitHub Actions
+
+Secrets 中仅需配置 `BOT_USERNAME` 与 `BOT_PASSWORD`。公共配置由 `actions/checkout` 随代码自动带入工作目录，无需额外操作。
+
+### 优先级
 
 ```
-BOT_USERNAME=YourBotName
-BOT_PASSWORD=YourBotPassword
+命令行参数 > 系统环境变量（含 GHA env: 注入）> .env.pwd > .env > 内置默认值
 ```
-
-默认值：
-- `WIKI_API` — 脚本内置默认值为 `https://mzh.moegirl.org.cn/api.php`
-- `USER_AGENT` — 脚本内置默认值为 `ISBNNormaliserBot/1.0 (...)`
-
-说明：
-- 当前版本仅从 `.env` 读取 `BOT_USERNAME` 与 `BOT_PASSWORD`
-- 其余参数（如 `--max-edits`、`--dry-run`、`--to13` 等）请通过命令行传入
 
 ## 规范化规则
 
@@ -198,13 +273,16 @@ BOT_PASSWORD=YourBotPassword
 - 报错找不到 `RangeMessage.xml`：
   - 确认当前目录存在该文件，或通过 `--xml` 指定正确路径
 
+- 报错找不到 `BOT_USERNAME` / `BOT_PASSWORD`：
+  - 确认 `.env.pwd` 已创建并填写，或通过 `--bot-username` / `--bot-password` 传入
+
 - 机器人未执行编辑：
   - 先用 `--dry-run` 查看是否检测到可修改页面
   - 检查 `--max-edits` 是否设置为 0
   - 检查机器人账号权限与站点的 Allowbots/编辑限制策略
 
 - GitHub Actions 未产生提交：
-  - `update-rangemessage` 在文件无变化时会显示 “No changes to commit”，这是正常行为
+  - `update-rangemessage` 在文件无变化时会显示 "No changes to commit"，这是正常行为
 
 ## 参考资料
 
