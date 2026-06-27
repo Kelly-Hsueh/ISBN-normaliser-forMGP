@@ -13,7 +13,7 @@ import mwparserfromhell
 from isbn_normalise import Group, isbn_equivalence_key, load_groups, normalise_token
 
 SPECIAL_NAMESPACE_ALIASES = frozenset({"special", "特殊"})
-BOOKSOURCE_PAGE_ALIASES = frozenset({"网络书源", "網絡書源", "booksources"})
+BOOKSOURCE_PAGE_ALIASES = frozenset({"booksources", "書籍來源", "網絡書源", "網路書源", "网络书源"})
 
 
 def try_normalise_template_value(
