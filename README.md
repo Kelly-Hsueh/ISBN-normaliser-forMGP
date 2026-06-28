@@ -17,6 +17,10 @@
   - 可选：将 ISBN-10 转换为 ISBN-13
   - 可选：当参数1和参数2语义相同时，将模板替换为 `{{ISBNT|$1}}`，其中 `$1` 为连字符化 ISBN
 
+- **mw_bot_core.py** — 通用 MediaWiki 基础设施层
+  - 环境变量加载、HTTP 封装、登录/CSRF 鉴权、页面读写
+  - 无任何 ISBN 特定逻辑，可被其他 MediaWiki 机器人复用
+
 - **mw_isbn_bot.py** — MediaWiki 机器人运行时
   - 支持多种页面查询策略（通过 `--query` / `-q` 选择）
   - `transcludedin`：使用 `generator=transcludedin` 拉取嵌入 Template:ISBN 的页面及其修订版本
@@ -25,6 +29,7 @@
   - 当 API 返回结果超过大小限制时，打印警告信息并继续拉取后续数据
   - 检查 Allowbots 规则后再编辑
   - 支持编辑数量上限控制
+  - 根据实际改动类型逐页自动拼接编辑摘要
 
 ## 依赖资源
 
@@ -193,11 +198,16 @@ python mw_isbn_bot.py \
 
 - `isbn_template_normalise.py`：
   - wikitext 中 `{{ISBN}}` 模板批量处理逻辑
+  - `ChangeReport` 数据类追踪四类改动：BookSources 链接替换、连字符规范化、ISBN-10 转换、ISBNT 合并
   - 被 `mw_isbn_bot.py` 与命令行模板处理场景复用
+
+- `mw_bot_core.py`：
+  - 通用 MediaWiki 基础设施（env 加载、HTTP、鉴权、页面读写）
+  - 无任何 ISBN 特定依赖，可供其他机器人脚本直接复用
 
 - `mw_isbn_bot.py`：
   - MediaWiki 机器人入口
-  - 负责登录、分页拉取页面、检查 Allowbots、提交编辑
+  - 负责登录、分页拉取页面、检查 Allowbots、逐页拼接编辑摘要、提交编辑
 
 - `RangeMessage.xml`：
   - ISBN 号段规则来源文件
@@ -254,7 +264,7 @@ SUMMARY=根据 ISO 2108:2017（...）自动调整ISBN（...）
 | `XML_PATH` | `--xml` | RangeMessage.xml 路径 |
 | `REHYPHENATE_EQUAL_LABEL` | `--rehyphenate-equal-label` | 语义相同时合并为 ISBNT |
 | `TO13` | `-to13` | 将 ISBN-10 转换为 ISBN-13 |
-| `SUMMARY` | `--summary` | 编辑摘要 |
+| `SUMMARY` | `--summary` | ISO 2108 说明文字（附加于每条摘要末尾） |
 
 如需适配其他 wiki，修改后提交即可。所有字段均可通过对应命令行参数临时覆盖。
 
@@ -282,7 +292,16 @@ Secrets 中仅需配置 `BOT_USERNAME` 与 `BOT_PASSWORD`。公共配置由 `act
 - 始终规范化模板第 1 参数（当有效时）
 - 默认保持第 2 参数不变
 - 仅在显式启用且语义相同时：将模板改为 `{{ISBNT|$1}}`，并保持第 1 参数为连字符格式
-- 编辑摘要：`根据 ISO 2108:2017（https://www.iso.org/standard/65483.html ）自动调整ISBN（若阁下对此次修改感到疑惑，可以前往 https://grp.isbn-international.org/ 查找出版社前缀信息）`
+- 编辑摘要由机器人根据实际改动类型逐页自动拼接，各部分以全角分号（`；`）连接，ISO 2108 说明文字始终附于末尾：
+
+  | 触发条件 | 摘要片段 |
+  |----------|----------|
+  | 替换了 `[[Special:BookSources/…]]` 链接 | `替换[[Special:BookSources/]]为{{[[T:ISBN\|ISBN]]}}` |
+  | 发生了 ISBN-10 → ISBN-13 转换 | `将 ISBN-10 转换为 ISBN-13` |
+  | 合并了语义相同的参数为 `{{ISBNT}}` | `自动使用{{[[T:ISBNT\|ISBNT]]}}` |
+  | 任意改动（始终附加） | `根据 ISO 2108:2017（…）自动调整ISBN（…）` |
+
+  ISO 2108 说明文字可通过 `SUMMARY` 环境变量或 `--summary` 参数自定义。
 
 ## 故障排查
 

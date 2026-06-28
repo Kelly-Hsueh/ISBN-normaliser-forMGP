@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rewrite ISBN templates in wikitext using ISBN normalization rules."""
+"""Rewrite ISBN templates in wikitext using ISBN normalisation rules."""
 
 from __future__ import annotations
 
@@ -21,8 +21,8 @@ from isbn_normalise import (
 )
 
 SPECIAL_NAMESPACE_ALIASES = frozenset({"special", "特殊"})
-BOOKSOURCE_PAGE_ALIASES = frozenset({"booksources", "書籍來源", "網絡書源", "網路書源", "网络书源"})
-
+BOOKSOURCE_PAGE_ALIASES = frozenset(
+    {"booksources", "書籍來源", "網絡書源", "網路書源", "网络书源"})
 
 # ---------------------------------------------------------------------------
 # Change report
@@ -34,14 +34,14 @@ class ChangeReport:
     """Counts of each distinct change type made to a single wikitext string."""
 
     booksource_links: int = 0  # [[Special:BookSources/…]] → {{ISBN}}
-    isbn_normalised: int = 0   # hyphen-only normalisation (incl. Cite book)
+    isbn_normalised: int = 0  # hyphen-only normalisation (incl. Cite book)
     isbn10_converted: int = 0  # ISBN-10 → ISBN-13 conversion
-    isbnt_merged: int = 0      # semantically-equal params → {{ISBNT|…}}
+    isbnt_merged: int = 0  # semantically-equal params → {{ISBNT|…}}
 
     @property
     def total(self) -> int:
-        return (self.booksource_links + self.isbn_normalised
-                + self.isbn10_converted + self.isbnt_merged)
+        return (self.booksource_links + self.isbn_normalised +
+                self.isbn10_converted + self.isbnt_merged)
 
     def __add__(self, other: ChangeReport) -> ChangeReport:
         return ChangeReport(
@@ -89,7 +89,8 @@ def get_template_label_value(
     label_str = str(template.get("2").value).strip()
     if not label_str:
         return None
-    normalised = try_normalise_template_value(label_str, groups, convert_10_to_13)
+    normalised = try_normalise_template_value(label_str, groups,
+                                              convert_10_to_13)
     return normalised if normalised is not None else label_str
 
 
@@ -231,7 +232,8 @@ def normalise_cite_book_isbn_templates(
         if not raw_value:
             continue
 
-        normalised_value = normalise_if_isbn(raw_value, groups, convert_10_to_13)
+        normalised_value = normalise_if_isbn(raw_value, groups,
+                                             convert_10_to_13)
         if normalised_value is None or normalised_value == raw_value:
             continue
 
@@ -258,7 +260,8 @@ def replace_booksource_links_with_isbn_templates(
         if link_isbn_raw is None:
             continue
 
-        normalised_link_isbn = normalise_if_isbn(link_isbn_raw, groups, convert_10_to_13)
+        normalised_link_isbn = normalise_if_isbn(link_isbn_raw, groups,
+                                                 convert_10_to_13)
         if normalised_link_isbn is None:
             continue
 
@@ -279,24 +282,28 @@ def replace_booksource_links_with_isbn_templates(
                 preferred_template = vals[0]
 
         if label_isbn_raw is not None:
-            label_isbn_normalised = normalise_if_isbn(
-                label_isbn_raw, groups, convert_10_to_13)
+            label_isbn_normalised = normalise_if_isbn(label_isbn_raw, groups,
+                                                      convert_10_to_13)
             if (label_isbn_normalised is not None
-                    and are_semantically_equal_isbns(link_isbn_raw, label_isbn_raw)):
-                replacement = build_isbn_template_node(
-                    normalised_link_isbn, None, preferred_template)
+                    and are_semantically_equal_isbns(link_isbn_raw,
+                                                     label_isbn_raw)):
+                replacement = build_isbn_template_node(normalised_link_isbn,
+                                                       None,
+                                                       preferred_template)
             else:
                 replacement = build_isbn_template_node(
                     normalised_link_isbn,
-                    label_isbn_normalised if label_isbn_normalised is not None else label_raw,
+                    label_isbn_normalised
+                    if label_isbn_normalised is not None else label_raw,
                     preferred_template,
                 )
         else:
-            label_isbn_normalised = normalise_if_isbn(
-                label_raw, groups, convert_10_to_13)
+            label_isbn_normalised = normalise_if_isbn(label_raw, groups,
+                                                      convert_10_to_13)
             replacement = build_isbn_template_node(
                 normalised_link_isbn,
-                label_isbn_normalised if label_isbn_normalised is not None else label_raw,
+                label_isbn_normalised
+                if label_isbn_normalised is not None else label_raw,
                 preferred_template,
             )
 
@@ -324,10 +331,16 @@ def normalise_isbn_templates(
 
     code = mwparserfromhell.parse(text)
     report += normalise_cite_book_isbn_templates(
-        code, groups, convert_10_to_13, template_name_aliases,
+        code,
+        groups,
+        convert_10_to_13,
+        template_name_aliases,
     )
     report += replace_booksource_links_with_isbn_templates(
-        code, groups, convert_10_to_13, template_preferred_map,
+        code,
+        groups,
+        convert_10_to_13,
+        template_preferred_map,
     )
 
     templates_found = list(
@@ -341,12 +354,13 @@ def normalise_isbn_templates(
         param1 = template.get("1")
         code_str = str(param1.value).strip()
 
-        normalised_1 = try_normalise_template_value(
-            code_str, groups, convert_10_to_13)
+        normalised_1 = try_normalise_template_value(code_str, groups,
+                                                    convert_10_to_13)
         if normalised_1 is None:
             continue
 
-        output_label = get_template_label_value(template, groups, convert_10_to_13)
+        output_label = get_template_label_value(template, groups,
+                                                convert_10_to_13)
         equal_isbn = are_semantically_equal_isbns(code_str, output_label)
 
         if rehyphenate_equal_label and equal_isbn:
@@ -372,7 +386,7 @@ def normalise_isbn_templates(
         template.get("1").value = normalised_1
         update_template_label(template, output_label)
 
-        if convert_10_to_13 and _is_isbn10_input(code_str):
+        if convert_10_to_13 and _is_isbn10_input(original_code):
             report.isbn10_converted += 1
         else:
             report.isbn_normalised += 1
@@ -389,21 +403,31 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Rewrite ISBN templates in wikitext "
         "using ISBN range XML rules.")
-    parser.add_argument("--xml", default="RangeMessage.xml",
+    parser.add_argument("--xml",
+                        default="RangeMessage.xml",
                         help="Path to ISBN range XML file.")
-    parser.add_argument("--text-file", required=True,
-                        help="Path to wikitext file to rewrite ISBN templates.")
-    parser.add_argument("--in-place", action="store_true",
-                        help="Write output back to --text-file instead of printing.")
-    parser.add_argument("-to13", "--to13", action="store_true",
+    parser.add_argument(
+        "--text-file",
+        required=True,
+        help="Path to wikitext file to rewrite ISBN templates.")
+    parser.add_argument(
+        "--in-place",
+        action="store_true",
+        help="Write output back to --text-file instead of printing.")
+    parser.add_argument("-to13",
+                        "--to13",
+                        action="store_true",
                         help="Convert ISBN-10 to ISBN-13 before output.")
-    parser.add_argument("--rehyphenate-equal-label", action="store_true",
-                        help=(
-                            "When template parameter 1 and 2 are semantically "
-                            "the same ISBN, replace the template with "
-                            "{{ISBNT|$1}} and keep parameter 1 hyphenated."))
-    parser.add_argument("-format", action="store_true",
-                        help="Compatibility flag; formatting is always enabled.")
+    parser.add_argument(
+        "--rehyphenate-equal-label",
+        action="store_true",
+        help=("When template parameter 1 and 2 are semantically "
+              "the same ISBN, replace the template with "
+              "{{ISBNT|$1}} and keep parameter 1 hyphenated."))
+    parser.add_argument(
+        "-format",
+        action="store_true",
+        help="Compatibility flag; formatting is always enabled.")
 
     args = parser.parse_args()
 

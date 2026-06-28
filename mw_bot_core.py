@@ -360,11 +360,15 @@ def fetch_transcluded_pages_with_revisions(
             if warning_msg := warnings.get("warnings", ""):
                 print(f"[API WARNING] {warning_msg}", file=sys.stderr)
 
-        if not curtimestamp and isinstance(response_data.get("curtimestamp"), str):
+        if not curtimestamp and isinstance(response_data.get("curtimestamp"),
+                                           str):
             curtimestamp = response_data["curtimestamp"]
 
         _merge_generated_pages_with_revisions(
-            response_data, pageids, seen, pages_by_id,
+            response_data,
+            pageids,
+            seen,
+            pages_by_id,
         )
 
         cont = response_data.get("continue")
@@ -413,7 +417,8 @@ def fetch_pages_by_pageids_with_revisions(
                 f"API error on pageid revisions query: {response_data['error']}"
             )
 
-        if not curtimestamp and isinstance(response_data.get("curtimestamp"), str):
+        if not curtimestamp and isinstance(response_data.get("curtimestamp"),
+                                           str):
             curtimestamp = response_data["curtimestamp"]
 
         pages = response_data.get("query", {}).get("pages", [])

@@ -8,14 +8,18 @@ A standalone normalisation tool and MediaWiki bot for the {{[ISBN](https://mzh.m
 
 ## Core Features
 
-- **isbn_normalise.py** — Pure ISBN normalization library
+- **isbn_normalise.py** — Pure ISBN normalisation library
   - Hyphenate ISBN-10/13 per international registration group rules
   - Optional: Convert ISBN-10 to ISBN-13
 
-- **isbn_template_normalise.py** — Wikitext template normalization tool
+- **isbn_template_normalise.py** — Wikitext template normalisation tool
   - Batch-process `{{ISBN}}` template parameters
   - Optional: Convert ISBN-10 to ISBN-13
   - Optional: When parameter 1 and 2 are semantically identical, replace the template with `{{ISBNT|$1}}`, where `$1` is the hyphenated ISBN
+
+- **mw_bot_core.py** — Generic MediaWiki infrastructure layer
+  - Environment loading, HTTP helpers, login/CSRF auth, page read/write
+  - No ISBN-specific logic; can be reused by other MediaWiki bot scripts
 
 - **mw_isbn_bot.py** — MediaWiki bot runtime
   - Supports multiple page fetch strategies (selected via `--query` / `-q`)
@@ -25,6 +29,7 @@ A standalone normalisation tool and MediaWiki bot for the {{[ISBN](https://mzh.m
   - Detect and log API size limit warnings while continuing to fetch remaining data
   - Allowbots compliance check before editing
   - Configurable edit count limit per run
+  - Automatically composes per-page edit summaries based on the actual types of changes made
 
 ## Dependencies
 
@@ -193,11 +198,16 @@ File: `.github/workflows/update-booksource-aliases.yml`
 
 - `isbn_template_normalise.py`:
   - Batch rewrite logic for `{{ISBN}}` templates in wikitext
+  - `ChangeReport` dataclass tracks four change types: BookSources link replacement, hyphen normalisation, ISBN-10 conversion, ISBNT merge
   - Reused by `mw_isbn_bot.py` and template-oriented CLI workflows
+
+- `mw_bot_core.py`:
+  - Generic MediaWiki infrastructure (env loading, HTTP, auth, page read/write)
+  - No ISBN-specific dependencies; can be reused by other bot scripts directly
 
 - `mw_isbn_bot.py`:
   - MediaWiki bot entrypoint
-  - Handles login, paginated page fetch, Allowbots checks, and edit submission
+  - Handles login, paginated page fetch, Allowbots checks, per-page summary composition, and edit submission
 
 - `RangeMessage.xml`:
   - ISBN range rule source file
@@ -254,7 +264,7 @@ SUMMARY=根据 ISO 2108:2017（...）自动调整ISBN（...）
 | `XML_PATH` | `--xml` | Path to RangeMessage.xml |
 | `REHYPHENATE_EQUAL_LABEL` | `--rehyphenate-equal-label` | Merge semantically equal params into ISBNT |
 | `TO13` | `-to13` | Convert ISBN-10 to ISBN-13 |
-| `SUMMARY` | `--summary` | Edit summary text |
+| `SUMMARY` | `--summary` | ISO 2108 notice appended to every edit summary |
 
 To adapt to a different wiki, edit this file and commit the change. All fields can be overridden temporarily via the corresponding CLI flag.
 
@@ -277,12 +287,21 @@ Only `BOT_USERNAME` and `BOT_PASSWORD` need to be added to GitHub Secrets. Publi
 CLI flag > system env var (including GHA env: injection) > .env.pwd > .env > built-in default
 ```
 
-## Normalization Rules
+## Normalisation Rules
 
 - Always normalise template parameter 1 (when valid)
 - Keep parameter 2 unchanged by default
 - Only when explicitly enabled and semantically identical: rewrite the template as `{{ISBNT|$1}}` and keep parameter 1 hyphenated
-- Edit summary: `根据 ISO 2108:2017（https://www.iso.org/standard/65483.html ）自动调整ISBN（若阁下对此次修改感到疑惑，可以前往 https://grp.isbn-international.org/ 查找出版社前缀信息）`
+- Edit summaries are composed automatically per page based on the actual types of changes made, with components joined by fullwidth semicolons (`；`) and the ISO 2108 notice always appended last:
+
+  | Trigger | Summary component |
+  |---------|-------------------|
+  | Replaced `[[Special:BookSources/…]]` links | `替换[[Special:BookSources/]]为{{[[T:ISBN\|ISBN]]}}` |
+  | Converted ISBN-10 to ISBN-13 | `将 ISBN-10 转换为 ISBN-13` |
+  | Merged semantically equal params into `{{ISBNT}}` | `自动使用{{[[T:ISBNT\|ISBNT]]}}` |
+  | Any change (always appended) | `根据 ISO 2108:2017（…）自动调整ISBN（…）` |
+
+  The ISO 2108 notice text is configurable via the `SUMMARY` env var or `--summary` flag.
 
 ## Troubleshooting
 

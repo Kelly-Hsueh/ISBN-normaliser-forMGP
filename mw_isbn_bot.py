@@ -287,8 +287,7 @@ def compose_summary(report: ChangeReport, iso_summary: str) -> str:
     parts: list[str] = []
     if report.booksource_links:
         parts.append(
-            "替换[[Special:BookSources/]]为{{[[T:ISBN|ISBN]]}}"
-        )
+            "替换&lsqb;&lsqb;Special:网络书源/&rsqb;&rsqb;为{{[[T:ISBN|ISBN]]}}")
     if report.isbn10_converted:
         parts.append("将 ISBN-10 转换为 ISBN-13")
     if report.isbnt_merged:
@@ -446,7 +445,8 @@ def parse_runtime_config(
                     or os.environ.get("BOT_USERNAME", "")).strip()
     bot_password = (args.bot_password
                     or os.environ.get("BOT_PASSWORD", "")).strip()
-    user_agent = args.user_agent or os.environ.get("USER_AGENT", DEFAULT_USER_AGENT)
+    user_agent = args.user_agent or os.environ.get("USER_AGENT",
+                                                   DEFAULT_USER_AGENT)
 
     if not wiki_api:
         raise RuntimeError(
@@ -469,7 +469,7 @@ def validate_xml_path(xml_arg: str) -> Path:
     return xml_path
 
 
-def run_normalization_workflow(
+def run_normalisation_workflow(
     args: argparse.Namespace,
     session: requests.Session,
     wiki_api: str,
@@ -502,7 +502,9 @@ def run_normalization_workflow(
             wiki_api=wiki_api,
             pageids=DEBUG_TARGET_PAGEIDS,
         )
-        print(f"Fetched pages with revisions (debug pageids): {len(pages_by_id)}")
+        print(
+            f"Fetched pages with revisions (debug pageids): {len(pages_by_id)}"
+        )
     else:
         fetch_fn = _QUERY_STRATEGIES[args.query]
         pageids, pages_by_id, curtimestamp = fetch_fn(
@@ -559,11 +561,12 @@ def execute(args: argparse.Namespace) -> int:
         if not args.summary:
             args.summary = os.environ.get("SUMMARY", _DEFAULT_SUMMARY)
 
-        wiki_api, bot_username, bot_password, user_agent = parse_runtime_config(args)
+        wiki_api, bot_username, bot_password, user_agent = parse_runtime_config(
+            args)
         xml_path = validate_xml_path(args.xml)
         session = build_session(user_agent)
 
-        return run_normalization_workflow(
+        return run_normalisation_workflow(
             args=args,
             session=session,
             wiki_api=wiki_api,
@@ -583,25 +586,32 @@ def execute(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="MediaWiki runner for ISBN template normalization.")
+        description="MediaWiki runner for ISBN template normalisation.")
     parser.add_argument(
-        "--xml", default=None,
+        "--xml",
+        default=None,
         help="Path to ISBNRangeMessage XML file. Overrides XML_PATH in .env.",
     )
     parser.add_argument(
-        "-to13", "--to13", action="store_true", default=False,
+        "-to13",
+        "--to13",
+        action="store_true",
+        default=False,
         help="Convert ISBN-10 template values to ISBN-13 before output. "
         "Overrides TO13 in .env.",
     )
     parser.add_argument(
-        "--rehyphenate-equal-label", action="store_true", default=False,
+        "--rehyphenate-equal-label",
+        action="store_true",
+        default=False,
         help=(
             "When template param1 and param2 are semantically the same ISBN, "
             "replace the template with {{ISBNT|$1}} and keep parameter 1 "
             "hyphenated. Overrides REHYPHENATE_EQUAL_LABEL in .env."),
     )
     parser.add_argument(
-        "--query", "-q",
+        "--query",
+        "-q",
         choices=list(QUERY_ALIASES),
         metavar="{transcludedin|ti|booksource-search|booksource|bs}",
         default=None,
@@ -609,37 +619,46 @@ def build_parser() -> argparse.ArgumentParser:
         "Default: DEFAULT_QUERY env var (from .env), or 'transcludedin' if unset.",
     )
     parser.add_argument(
-        "--wiki-api", default=None,
+        "--wiki-api",
+        default=None,
         help="MediaWiki API endpoint. Overrides WIKI_API in .env.",
     )
     parser.add_argument(
-        "--bot-username", default=None,
+        "--bot-username",
+        default=None,
         help="Bot username. Overrides BOT_USERNAME in .env.pwd.",
     )
     parser.add_argument(
-        "--bot-password", default=None,
+        "--bot-password",
+        default=None,
         help="Bot password. Overrides BOT_PASSWORD in .env.pwd.",
     )
     parser.add_argument(
-        "--user-agent", default=None,
+        "--user-agent",
+        default=None,
         help="HTTP User-Agent. Overrides USER_AGENT in .env.",
     )
     parser.add_argument(
-        "--template-title", default=None,
+        "--template-title",
+        default=None,
         help="Template title(s) for transclusion lookup. "
         "Overrides TEMPLATE_TITLE in .env.",
     )
     parser.add_argument(
-        "--summary", default=None,
+        "--summary",
+        default=None,
         help="ISO 2108 notice appended to every edit summary. "
         "Overrides SUMMARY in .env.",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Run full workflow but do not save edits.",
     )
     parser.add_argument(
-        "--max-edits", type=int, default=None,
+        "--max-edits",
+        type=int,
+        default=None,
         help="Maximum number of edits to perform. Omit for unlimited.",
     )
     return parser
