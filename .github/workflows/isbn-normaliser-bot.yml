@@ -23,8 +23,8 @@ on:
         description: "Maximum number of edits to perform (optional, leave empty for unlimited)"
         required: false
         default: ""
-  # schedule:
-  #   - cron: '15 20 * * *'
+  schedule:
+    - cron: "15 20 1 */2 *"
 
 jobs:
   normalise-isbn:

@@ -19,7 +19,8 @@ A standalone normalisation tool and MediaWiki bot for the {{[ISBN](https://mzh.m
 
 - **mw_isbn_bot.py** — MediaWiki bot runtime
   - Supports multiple page fetch strategies (selected via `--query` / `-q`)
-  - Fetch pages transcluding Template:ISBN and their revisions in a single `generator=transcludedin` query
+  - `transcludedin`: fetch pages transcluding Template:ISBN and their revisions via `generator=transcludedin`
+  - `booksource-search`: find pages containing `Special:BookSources/` links via `insource:` full-text search
   - Automatic pagination via API continue and revision version continuation (rvcontinue)
   - Detect and log API size limit warnings while continuing to fetch remaining data
   - Allowbots compliance check before editing
@@ -107,7 +108,7 @@ python mw_isbn_bot.py --max-edits 10
 
 # Specify a fetch strategy
 python mw_isbn_bot.py -q ti --dry-run         # transcludedin, short form
-python mw_isbn_bot.py -q booksource-search    # booksource-search (planned)
+python mw_isbn_bot.py -q bs --dry-run         # booksource-search, short form
 ```
 
 Credentials can also be passed directly on the command line (not recommended for regular use):
@@ -124,7 +125,7 @@ python mw_isbn_bot.py \
 | Value | Alias | Description |
 |-------|-------|-------------|
 | `transcludedin` | `ti` | Fetch all pages transcluding Template:ISBN (default) |
-| `booksource-search` | `booksource`, `bs` | Full-text search for pages containing `Special:BookSources/` links (planned) |
+| `booksource-search` | `booksource`, `bs` | Full-text search for pages containing `Special:BookSources/` links |
 
 The default strategy is controlled by `DEFAULT_QUERY` in `.env`, falling back to `transcludedin` if unset.
 
@@ -140,9 +141,8 @@ File: `.github/workflows/isbn-normaliser-bot.yml`
   - `max_edits` — Edit count limit for this run (leave empty for unlimited)
   - Open the Actions tab and click "Run workflow"
 
-2. **Scheduled execution (optional)**
-  - `schedule` is currently commented out and can be enabled if needed
-  - Planned time: UTC `20:15` (cron: `15 20 * * *`)
+2. **Scheduled execution**
+  - Runs automatically on the 1st of every other month at UTC `20:15` (cron: `15 20 1 */2 *`)
 
 3. **Running multiple strategies (optional)**
   - Use a GHA matrix to run strategies in parallel:
@@ -165,6 +165,22 @@ File: `.github/workflows/update-rangemessage.yml`
 2. **Behavior**
   - Downloads the latest `RangeMessage.xml`
   - Commits and pushes only when the file content changes
+
+3. **Required permission**
+  - Workflow declares `contents: write` to allow commit and push
+
+### 3) Booksource Aliases Auto-update Workflow
+
+File: `.github/workflows/update-booksource-aliases.yml`
+
+1. **Trigger modes**
+  - Manual trigger (`workflow_dispatch`)
+  - Biannual scheduled run on January 1st and July 1st at UTC `03:05` (cron: `05 3 1 1,7 *`)
+
+2. **Behavior**
+  - Fetches all localised aliases for the `Booksources` special page from the MoegirlPedia API
+  - Canonicalises them (casefold, strip spaces and underscores) and updates the `BOOKSOURCE_PAGE_ALIASES` constant in `isbn_template_normalise.py` in-place
+  - Idempotent — commits only when the value actually changes
 
 3. **Required permission**
   - Workflow declares `contents: write` to allow commit and push
@@ -197,10 +213,13 @@ File: `.github/workflows/update-rangemessage.yml`
   - Template for `.env.pwd`; version-controlled
 
 - `.github/workflows/isbn-normaliser-bot.yml`:
-  - Bot execution workflow (manual trigger, optional schedule)
+  - Bot execution workflow (manual trigger + bimonthly schedule)
 
 - `.github/workflows/update-rangemessage.yml`:
-  - Workflow to update `RangeMessage.xml` automatically
+  - Workflow to update `RangeMessage.xml` automatically (weekly)
+
+- `.github/workflows/update-booksource-aliases.yml`:
+  - Workflow to update `BOOKSOURCE_PAGE_ALIASES` automatically (biannual)
 
 ## Environment Configuration
 
@@ -282,7 +301,7 @@ CLI flag > system env var (including GHA env: injection) > .env.pwd > .env > bui
   - Verify bot permissions and local Allowbots/editing policy on the target wiki
 
 - GitHub Actions run has no commit:
-  - For `update-rangemessage`, "No changes to commit" is expected when upstream range data did not change
+  - For `update-rangemessage` and `update-booksource-aliases`, "No changes to commit" is expected when upstream data did not change
 
 ## References
 

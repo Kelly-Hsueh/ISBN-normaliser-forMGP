@@ -19,7 +19,8 @@
 
 - **mw_isbn_bot.py** — MediaWiki 机器人运行时
   - 支持多种页面查询策略（通过 `--query` / `-q` 选择）
-  - 使用 `generator=transcludedin` 拉取嵌入 Template:ISBN 的页面及其修订版本
+  - `transcludedin`：使用 `generator=transcludedin` 拉取嵌入 Template:ISBN 的页面及其修订版本
+  - `booksource-search`：通过 `insource:` 全文检索，找出含 `Special:BookSources/` 链接的页面
   - 自动处理 API 分页（continue）和修订版本续取（rvcontinue）
   - 当 API 返回结果超过大小限制时，打印警告信息并继续拉取后续数据
   - 检查 Allowbots 规则后再编辑
@@ -107,7 +108,7 @@ python mw_isbn_bot.py --max-edits 10
 
 # 指定查询方式
 python mw_isbn_bot.py -q ti --dry-run          # transcludedin，使用简写
-python mw_isbn_bot.py -q booksource-search     # booksource-search（计划中）
+python mw_isbn_bot.py -q bs --dry-run          # booksource-search，使用简写
 ```
 
 也可在命令行中临时覆盖凭据（不建议常用）：
@@ -124,7 +125,7 @@ python mw_isbn_bot.py \
 | 参数值 | 简写 | 说明 |
 |--------|------|------|
 | `transcludedin` | `ti` | 拉取所有嵌入 Template:ISBN 的页面（默认） |
-| `booksource-search` | `booksource`、`bs` | 通过全文检索找含 `Special:BookSources/` 链接的页面（计划中）|
+| `booksource-search` | `booksource`、`bs` | 通过全文检索找含 `Special:BookSources/` 链接的页面 |
 
 默认查询方式由 `.env` 中的 `DEFAULT_QUERY` 决定，未配置时回落到 `transcludedin`。
 
@@ -140,9 +141,8 @@ python mw_isbn_bot.py \
   - `max_edits` — 本次最多编辑数量（留空则不限）
   - 访问 Actions 标签页点击"运行工作流"
 
-2. **定时执行（可选）**
-  - 当前 `schedule` 已注释，可按需取消注释启用
-  - 计划时间为 UTC `20:15`（cron: `15 20 * * *`）
+2. **定时执行**
+  - 每两个月的 1 日 UTC `20:15` 自动执行（cron: `15 20 1 */2 *`）
 
 3. **多策略并行（可选）**
   - 如需同时运行多种查询策略，可在 GHA 中使用矩阵策略：
@@ -165,6 +165,22 @@ python mw_isbn_bot.py \
 2. **行为说明**
   - 下载最新 `RangeMessage.xml`
   - 若文件有变化，自动提交并推送到当前分支
+
+3. **权限要求**
+  - 工作流已声明 `contents: write`，用于提交更新
+
+### 3) BookSource 别名更新工作流
+
+文件：`.github/workflows/update-booksource-aliases.yml`
+
+1. **触发方式**
+  - 支持手动触发（`workflow_dispatch`）
+  - 每年 1 月 1 日和 7 月 1 日 UTC `03:05` 自动执行（cron: `05 3 1 1,7 *`）
+
+2. **行为说明**
+  - 从萌娘百科 API 拉取 `Booksources` 特殊页面的全部本地化别名
+  - 规范化（casefold、去除空格与下划线）后，原地更新 `isbn_template_normalise.py` 中的 `BOOKSOURCE_PAGE_ALIASES` 常量
+  - 若常量值无变化，不产生提交
 
 3. **权限要求**
   - 工作流已声明 `contents: write`，用于提交更新
@@ -197,10 +213,13 @@ python mw_isbn_bot.py \
   - `.env.pwd` 的填写模板，纳入版本控制
 
 - `.github/workflows/isbn-normaliser-bot.yml`：
-  - 机器人执行工作流（手动触发，可选定时）
+  - 机器人执行工作流（手动触发 + 每两个月定时）
 
 - `.github/workflows/update-rangemessage.yml`：
-  - 自动更新 `RangeMessage.xml` 的工作流
+  - 自动更新 `RangeMessage.xml` 的工作流（每周三）
+
+- `.github/workflows/update-booksource-aliases.yml`：
+  - 自动更新 `BOOKSOURCE_PAGE_ALIASES` 的工作流（每半年）
 
 ## 环境变量配置
 
@@ -282,7 +301,7 @@ Secrets 中仅需配置 `BOT_USERNAME` 与 `BOT_PASSWORD`。公共配置由 `act
   - 检查机器人账号权限与站点的 Allowbots/编辑限制策略
 
 - GitHub Actions 未产生提交：
-  - `update-rangemessage` 在文件无变化时会显示 "No changes to commit"，这是正常行为
+  - `update-rangemessage` 和 `update-booksource-aliases` 在文件无变化时会显示 "No changes to commit"，这是正常行为
 
 ## 参考资料
 
