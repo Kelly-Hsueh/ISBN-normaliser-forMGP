@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
-import json
 import os
 import re
 import sys
@@ -11,13 +9,30 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-import brotli
 import requests
 
+from mw_bot_core import (
+    _MAXLAG,
+    _TIMEOUT,
+    _parse_bool_env,
+    allowbots,
+    api_post_json,
+    build_session,
+    edit_page_text,
+    extract_baserevid,
+    extract_main_content,
+    fetch_pages_by_pageids_with_revisions,
+    fetch_transcluded_pages_with_revisions,
+    get_csrf_token,
+    load_env_files,
+    login_with_bot_password,
+    normalise_assert_user,
+)
 from isbn_template_normalise import (
-    normalise_isbn_templates,
-    canonicalise_title_fragment,
     BOOKSOURCE_PAGE_ALIASES,
+    ChangeReport,
+    canonicalise_title_fragment,
+    normalise_isbn_templates,
 )
 
 DEFAULT_USER_AGENT = (
@@ -32,9 +47,7 @@ _DEFAULT_SUMMARY = (
     "调整ISBN（若阁下对此次修改感到疑惑，可以前往 https://grp.isbn-international.org/"
     " 查找出版社前缀信息）")
 
-# Hardcoded operational constants — not exposed as CLI flags or env vars.
-_MAXLAG: int = 3
-_TIMEOUT: int = 30
+# ISBN-bot specific operational constants.
 _EDIT_INTERVAL: float = 0.2
 _USE_BOT_FLAG: bool = True
 
@@ -52,238 +65,8 @@ QUERY_ALIASES: dict[str, str] = {
 }
 
 # ---------------------------------------------------------------------------
-# Environment loading
+# Page skip logic
 # ---------------------------------------------------------------------------
-
-
-def load_env_file(env_path: str) -> None:
-    """Load key=value pairs from *env_path* into os.environ via setdefault.
-
-    setdefault means: values already present in os.environ (e.g. injected by
-    GitHub Actions via ``env:``) are never overwritten.
-    """
-    path = Path(env_path)
-    if not path.exists() or not path.is_file():
-        return
-
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if not key:
-            continue
-
-        if ((value.startswith('"') and value.endswith('"'))
-                or (value.startswith("'") and value.endswith("'"))):
-            value = value[1:-1]
-
-        os.environ.setdefault(key, value)
-
-
-def load_env_files() -> None:
-    """Load both env files with the correct priority order.
-
-    Priority (highest to lowest):
-      1. Variables already in os.environ  (e.g. GHA ``env:`` injection)
-      2. .env.pwd                         (private credentials, gitignored)
-      3. .env                             (public config, version-controlled)
-
-    Because load_env_file uses setdefault, loading .env.pwd *before* .env
-    ensures .env.pwd values survive the subsequent .env load.
-    """
-    load_env_file(".env.pwd")
-    load_env_file(".env")
-
-
-def _parse_bool_env(key: str, *, default: bool) -> bool:
-    """Read a boolean value from os.environ[key].
-
-    Accepts: 1/true/yes (case-insensitive) -> True,
-             0/false/no  (case-insensitive) -> False,
-             absent / empty                 -> *default*.
-    """
-    raw = os.environ.get(key, "").strip().lower()
-    if not raw:
-        return default
-    if raw in ("1", "true", "yes"):
-        return True
-    if raw in ("0", "false", "no"):
-        return False
-    raise RuntimeError(
-        f"Environment variable {key!r} must be true/false/1/0/yes/no, got {raw!r}."
-    )
-
-
-# ---------------------------------------------------------------------------
-# HTTP helpers
-# ---------------------------------------------------------------------------
-
-
-def safe_get_json(response: requests.Response) -> dict[str, Any]:
-    try:
-        data = response.json()
-    except ValueError as exc:
-        raise RuntimeError(
-            f"API returned non-JSON response, HTTP {response.status_code}"
-        ) from exc
-    if not isinstance(data, dict):
-        raise RuntimeError("API JSON response is not an object.")
-    return data
-
-
-def parse_response_json(response: requests.Response) -> dict[str, Any]:
-    # 1) Normal path: requests handles JSON (and often compression) for us.
-    with contextlib.suppress(RuntimeError):
-        return safe_get_json(response)
-
-    # 2) Fallback: some endpoints may return brotli bytes without reliable headers.
-    with contextlib.suppress(brotli.error, UnicodeDecodeError,
-                             json.JSONDecodeError):
-        decoded = brotli.decompress(response.content).decode("utf-8")
-        data = json.loads(decoded)
-        if isinstance(data, dict):
-            return data
-
-    preview = response.text[:160].replace("\n", " ")
-    raise RuntimeError(
-        f"API returned non-JSON response, HTTP {response.status_code}, body={preview!r}"
-    )
-
-
-def build_session(user_agent: str) -> requests.Session:
-    session = requests.Session()
-    session.headers.update({"User-Agent": user_agent})
-    return session
-
-
-def api_get_json(
-    session: requests.Session,
-    wiki_api: str,
-    params: dict[str, Any],
-    timeout: int,
-    error_context: str,
-) -> dict[str, Any]:
-    try:
-        response = session.get(wiki_api, params=params, timeout=timeout)
-        response.raise_for_status()
-        return parse_response_json(response)
-    except Exception as exc:
-        raise RuntimeError(f"{error_context}: {exc}") from exc
-
-
-def api_post_json(
-    session: requests.Session,
-    wiki_api: str,
-    data: dict[str, Any],
-    timeout: int,
-    error_context: str,
-) -> dict[str, Any]:
-    try:
-        response = session.post(wiki_api, data=data, timeout=timeout)
-        response.raise_for_status()
-        return parse_response_json(response)
-    except Exception as exc:
-        raise RuntimeError(f"{error_context}: {exc}") from exc
-
-
-# ---------------------------------------------------------------------------
-# MediaWiki auth
-# ---------------------------------------------------------------------------
-
-
-def get_login_token(
-    session: requests.Session,
-    wiki_api: str,
-) -> str:
-    data = api_get_json(
-        session=session,
-        wiki_api=wiki_api,
-        params={
-            "action": "query",
-            "meta": "tokens",
-            "type": "login",
-            "format": "json",
-            "maxlag": _MAXLAG,
-        },
-        timeout=_TIMEOUT,
-        error_context="Failed to fetch login token",
-    )
-    token = data.get("query", {}).get("tokens", {}).get("logintoken")
-    if not isinstance(token, str) or not token:
-        raise RuntimeError(f"Login token missing: {data}")
-    return token
-
-
-def normalise_assert_user(bot_username: str) -> str:
-    # MediaWiki assertuser does not accept suffixes like @group or @host.
-    return bot_username.split("@", 1)[0]
-
-
-def login_with_bot_password(
-    session: requests.Session,
-    wiki_api: str,
-    bot_username: str,
-    bot_password: str,
-) -> None:
-    login_token = get_login_token(session=session, wiki_api=wiki_api)
-
-    result = api_post_json(
-        session=session,
-        wiki_api=wiki_api,
-        data={
-            "action": "login",
-            "lgname": bot_username,
-            "lgpassword": bot_password,
-            "lgtoken": login_token,
-            "format": "json",
-            "maxlag": _MAXLAG,
-        },
-        timeout=_TIMEOUT,
-        error_context="Login request failed",
-    )
-    if result.get("login", {}).get("result") != "Success":
-        raise RuntimeError(f"Login failed: {result}")
-
-
-def get_csrf_token(
-    session: requests.Session,
-    wiki_api: str,
-    assert_user: str,
-) -> str:
-    data = api_get_json(
-        session=session,
-        wiki_api=wiki_api,
-        params={
-            "action": "query",
-            "meta": "tokens",
-            "format": "json",
-            "assertuser": assert_user,
-            "maxlag": _MAXLAG,
-        },
-        timeout=_TIMEOUT,
-        error_context="Failed to fetch CSRF token",
-    )
-    token = data.get("query", {}).get("tokens", {}).get("csrftoken")
-    if not isinstance(token, str) or not token:
-        raise RuntimeError(f"CSRF token missing: {data}")
-    return token
-
-
-# ---------------------------------------------------------------------------
-# Page content helpers
-# ---------------------------------------------------------------------------
-
-
-def allowbots(text: str, user: str) -> bool:
-    escaped_user = re.escape(user)
-    pattern = (r"\{\{(nobots|bots\|"
-               r"(allow=none|deny=.*?" + escaped_user + r".*?"
-               r"|optout=all|deny=all))\}\}")
-    return not re.search(pattern, text, flags=re.IGNORECASE)
 
 
 def is_underconstruction(text: str) -> bool:
@@ -291,104 +74,15 @@ def is_underconstruction(text: str) -> bool:
     return bool(re.search(pattern, text, flags=re.IGNORECASE))
 
 
-def _merge_generated_pages_with_revisions(
-    data: dict[str, Any],
-    pageids: list[int],
-    seen: set[int],
-    pages_by_id: dict[int, dict[str, Any]],
-) -> None:
-    pages = data.get("query", {}).get("pages", [])
-    if not isinstance(pages, list):
-        return
-
-    for page in pages:
-        if not isinstance(page, dict):
-            continue
-
-        pageid = page.get("pageid")
-        if not isinstance(pageid, int):
-            continue
-
-        if pageid not in seen:
-            seen.add(pageid)
-            pageids.append(pageid)
-
-        merged = dict(pages_by_id.get(pageid, {}))
-        for key, value in page.items():
-            if key == "revisions":
-                # Keep existing revisions when this chunk only carries metadata.
-                existing_revisions = merged.get("revisions")
-                if isinstance(value, list) and (
-                        value or not isinstance(existing_revisions, list)):
-                    merged[key] = value
-                continue
-            merged[key] = value
-        pages_by_id[pageid] = merged
+def get_skip_reason(content: str, assert_user: str) -> str | None:
+    if not allowbots(content, assert_user):
+        return "bots"
+    return "inuse" if is_underconstruction(content) else None
 
 
 # ---------------------------------------------------------------------------
 # Query strategies
 # ---------------------------------------------------------------------------
-
-
-def fetch_transcluded_pages_with_revisions(
-    session: requests.Session,
-    wiki_api: str,
-    template_title: str,
-) -> tuple[list[int], dict[int, dict[str, Any]], str]:
-    pageids: list[int] = []
-    seen: set[int] = set()
-    pages_by_id: dict[int, dict[str, Any]] = {}
-    curtimestamp = ""
-
-    request_data: dict[str, Any] = {
-        "action": "query",
-        "format": "json",
-        "maxlag": _MAXLAG,
-        "prop": "revisions",
-        "titles": template_title,
-        "generator": "transcludedin",
-        "formatversion": 2,
-        "rvprop": "content|ids",
-        "rvslots": "main",
-        "gtilimit": "max",
-        "curtimestamp": 1,
-    }
-
-    while True:
-        response_data = api_post_json(
-            session=session,
-            wiki_api=wiki_api,
-            data=request_data,
-            timeout=_TIMEOUT,
-            error_context="Failed to fetch transcluded pages with revisions",
-        )
-        if "error" in response_data:
-            raise RuntimeError(
-                f"API error on transcluded revisions query: {response_data['error']}"
-            )
-
-        if warnings := response_data.get("warnings", {}).get("result", {}):
-            if warning_msg := warnings.get("warnings", ""):
-                print(f"[API WARNING] {warning_msg}", file=sys.stderr)
-
-        if not curtimestamp and isinstance(response_data.get("curtimestamp"),
-                                           str):
-            curtimestamp = response_data["curtimestamp"]
-
-        _merge_generated_pages_with_revisions(
-            response_data,
-            pageids,
-            seen,
-            pages_by_id,
-        )
-
-        cont = response_data.get("continue")
-        if not isinstance(cont, dict):
-            break
-        request_data |= cont
-
-    return pageids, pages_by_id, curtimestamp
 
 
 def search_insource_pages(
@@ -464,7 +158,7 @@ def collect_booksource_search_pageids(
                 file=sys.stderr,
             )
             found = set()
-        print(f"  -> {len(found)} pages")
+        print(f"  \u2192 {len(found)} pages")
         all_pageids |= found
     print(f"Total unique pages (booksource-search): {len(all_pageids)}")
     return list(all_pageids)
@@ -473,7 +167,7 @@ def collect_booksource_search_pageids(
 def _fetch_by_booksource_search(
     session: requests.Session,
     wiki_api: str,
-    template_title: str,  # unused; present for _FetchFn compatibility
+    template_title: str,  # unused; present for _FetchFn signature compatibility
 ) -> tuple[list[int], dict[int, dict[str, Any]], str]:
     raw_pageids = collect_booksource_search_pageids(
         session=session,
@@ -497,127 +191,9 @@ _QUERY_STRATEGIES: dict[str, _FetchFn] = {
     "booksource-search": _fetch_by_booksource_search,
 }
 
-
-def fetch_pages_by_pageids_with_revisions(
-    session: requests.Session,
-    wiki_api: str,
-    pageids: list[int],
-) -> tuple[list[int], dict[int, dict[str, Any]], str]:
-    target_ids = [pid for pid in pageids if isinstance(pid, int) and pid > 0]
-    if not target_ids:
-        return [], {}, ""
-
-    ordered_pageids: list[int] = []
-    pages_by_id: dict[int, dict[str, Any]] = {}
-    curtimestamp = ""
-
-    chunk_size = 50
-    for i in range(0, len(target_ids), chunk_size):
-        chunk = target_ids[i:i + chunk_size]
-        response_data = api_post_json(
-            session=session,
-            wiki_api=wiki_api,
-            data={
-                "action": "query",
-                "format": "json",
-                "formatversion": 2,
-                "maxlag": _MAXLAG,
-                "prop": "revisions",
-                "pageids": "|".join(str(pid) for pid in chunk),
-                "rvprop": "content|ids",
-                "rvslots": "main",
-                "curtimestamp": 1,
-            },
-            timeout=_TIMEOUT,
-            error_context="Failed to fetch pages by pageid with revisions",
-        )
-        if "error" in response_data:
-            raise RuntimeError(
-                f"API error on pageid revisions query: {response_data['error']}"
-            )
-
-        if not curtimestamp and isinstance(response_data.get("curtimestamp"),
-                                           str):
-            curtimestamp = response_data["curtimestamp"]
-
-        pages = response_data.get("query", {}).get("pages", [])
-        if not isinstance(pages, list):
-            continue
-
-        for page in pages:
-            if not isinstance(page, dict):
-                continue
-            pageid = page.get("pageid")
-            if not isinstance(pageid, int):
-                continue
-
-            if pageid not in ordered_pageids:
-                ordered_pageids.append(pageid)
-
-            pages_by_id[pageid] = page
-
-    ordered = [pid for pid in target_ids if pid in pages_by_id]
-    return ordered, pages_by_id, curtimestamp
-
-
 # ---------------------------------------------------------------------------
-# Page processing
+# ISBN-specific helpers
 # ---------------------------------------------------------------------------
-
-
-def extract_main_content(page: dict[str, Any]) -> str | None:
-    revisions = page.get("revisions")
-    if not isinstance(revisions, list) or not revisions:
-        return None
-
-    rev0 = revisions[0]
-    if not isinstance(rev0, dict):
-        return None
-
-    slots = rev0.get("slots")
-    if not isinstance(slots, dict):
-        content = rev0.get("content")
-        return content if isinstance(content, str) else None
-
-    main = slots.get("main")
-    if not isinstance(main, dict):
-        return None
-    content = main.get("content")
-    return content if isinstance(content, str) else None
-
-
-def extract_baserevid(page: dict[str, Any]) -> str:
-    revisions = page.get("revisions")
-    if not isinstance(revisions, list) or not revisions:
-        return ""
-
-    rev0 = revisions[0]
-    if not isinstance(rev0, dict):
-        return ""
-
-    revid = rev0.get("revid")
-    return str(revid) if revid is not None else ""
-
-
-def get_skip_reason(content: str, assert_user: str) -> str | None:
-    if not allowbots(content, assert_user):
-        return "bots"
-    return "inuse" if is_underconstruction(content) else None
-
-
-def normalise_page_isbn_templates(
-    content: str,
-    args: argparse.Namespace,
-    xml_path: Path,
-    template_preferred_map: dict[str, str] | None = None,
-) -> tuple[str, int]:
-    return normalise_isbn_templates(
-        content,
-        xml_path,
-        convert_10_to_13=args.to13,
-        rehyphenate_equal_label=args.rehyphenate_equal_label,
-        template_preferred_map=template_preferred_map,
-    )
 
 
 def resolve_template_aliases(
@@ -684,52 +260,46 @@ def resolve_template_aliases(
     return preferred
 
 
-def edit_page_text(
-    session: requests.Session,
-    wiki_api: str,
-    pageid: int,
-    text: str,
-    summary: str,
-    csrf_token: str,
-    assert_user: str,
-    bot: bool,
-    baserevid: str = "",
-    starttimestamp: str = "",
-) -> dict[str, Any]:
-    data: dict[str, Any] = {
-        "action": "edit",
-        "format": "json",
-        "maxlag": _MAXLAG,
-        "assertuser": assert_user,
-        "pageid": str(pageid),
-        "text": text,
-        "summary": summary,
-        "token": csrf_token,
-        "tags": "Bot",
-        "minor": 1,
-    }
-    if bot:
-        data["bot"] = "1"
-    if baserevid:
-        data["baserevid"] = baserevid
-    if starttimestamp:
-        data["starttimestamp"] = starttimestamp
-
-    result = api_post_json(
-        session=session,
-        wiki_api=wiki_api,
-        data=data,
-        timeout=_TIMEOUT,
-        error_context=f"Failed to edit pageid={pageid}",
+def normalise_page_isbn_templates(
+    content: str,
+    args: argparse.Namespace,
+    xml_path: Path,
+    template_preferred_map: dict[str, str] | None = None,
+) -> tuple[str, ChangeReport]:
+    return normalise_isbn_templates(
+        content,
+        xml_path,
+        convert_10_to_13=args.to13,
+        rehyphenate_equal_label=args.rehyphenate_equal_label,
+        template_preferred_map=template_preferred_map,
     )
-    if "error" in result:
-        error_code = result.get("error", {}).get("code", "")
-        if error_code == "editconflict":
-            raise RuntimeError(
-                f"[editconflict] pageid={pageid}: {result['error']}")
-        raise RuntimeError(
-            f"API edit error for pageid={pageid}: {result['error']}")
-    return result
+
+
+def compose_summary(report: ChangeReport, iso_summary: str) -> str:
+    """Build a per-page edit summary from the change breakdown.
+
+    Components (joined by fullwidth semicolons):
+      - booksource link replacement (if any)
+      - ISBN-10 → ISBN-13 conversion (if any)
+      - {{ISBNT}} merge (if any)
+      - ISO 2108 hyphenation notice (always, since every change touches ISBNs)
+    """
+    parts: list[str] = []
+    if report.booksource_links:
+        parts.append(
+            "替换[[Special:BookSources/]]为{{[[T:ISBN|ISBN]]}}"
+        )
+    if report.isbn10_converted:
+        parts.append("将 ISBN-10 转换为 ISBN-13")
+    if report.isbnt_merged:
+        parts.append("自动使用{{[[T:ISBNT|ISBNT]]}}")
+    parts.append(iso_summary)
+    return "；".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Page processing
+# ---------------------------------------------------------------------------
 
 
 def _try_apply_changes(
@@ -744,6 +314,7 @@ def _try_apply_changes(
     assert_user: str,
     baserevid: str,
     start_timestamp: str,
+    summary: str,
 ) -> tuple[bool, bool]:
     """Apply changes to page (dry-run or real edit).
 
@@ -761,7 +332,7 @@ def _try_apply_changes(
             wiki_api=wiki_api,
             pageid=pageid,
             text=new_text,
-            summary=args.summary,
+            summary=summary,
             csrf_token=csrf_token,
             assert_user=assert_user,
             bot=_USE_BOT_FLAG,
@@ -823,13 +394,13 @@ def process_pages(
             print(f"[SKIP][{skip_reason}] pageid={pageid} title={title}")
             continue
 
-        new_text, replacements = normalise_page_isbn_templates(
+        new_text, report = normalise_page_isbn_templates(
             content,
             args,
             xml_path,
             template_preferred_map=template_preferred_map,
         )
-        if replacements <= 0 or new_text == content:
+        if not report.total or new_text == content:
             continue
 
         if args.max_edits is not None and changed >= args.max_edits:
@@ -838,18 +409,21 @@ def process_pages(
             )
             break
 
+        page_summary = compose_summary(report, args.summary)
+
         changed_flag, failed_flag = _try_apply_changes(
             session=session,
             wiki_api=wiki_api,
             pageid=pageid,
             title=title,
             new_text=new_text,
-            replacements=replacements,
+            replacements=report.total,
             args=args,
             csrf_token=csrf_token,
             assert_user=assert_user,
             baserevid=baserevid,
             start_timestamp=start_timestamp,
+            summary=page_summary,
         )
         if changed_flag:
             changed += 1
@@ -866,14 +440,13 @@ def process_pages(
 
 def parse_runtime_config(
         args: argparse.Namespace) -> tuple[str, str, str, str]:
-    """Resolve runtime config with priority: CLI flag > env var > built-in default."""
+    """Resolve runtime config: CLI flag > env var > built-in default."""
     wiki_api = args.wiki_api or os.environ.get("WIKI_API", DEFAULT_WIKI_API)
     bot_username = (args.bot_username
                     or os.environ.get("BOT_USERNAME", "")).strip()
     bot_password = (args.bot_password
                     or os.environ.get("BOT_PASSWORD", "")).strip()
-    user_agent = args.user_agent or os.environ.get("USER_AGENT",
-                                                   DEFAULT_USER_AGENT)
+    user_agent = args.user_agent or os.environ.get("USER_AGENT", DEFAULT_USER_AGENT)
 
     if not wiki_api:
         raise RuntimeError(
@@ -886,7 +459,6 @@ def parse_runtime_config(
         raise RuntimeError(
             "BOT_PASSWORD is required (--bot-password flag, or BOT_PASSWORD in .env.pwd)."
         )
-
     return wiki_api, bot_username, bot_password, user_agent
 
 
@@ -930,9 +502,7 @@ def run_normalization_workflow(
             wiki_api=wiki_api,
             pageids=DEBUG_TARGET_PAGEIDS,
         )
-        print(
-            f"Fetched pages with revisions (debug pageids): {len(pages_by_id)}"
-        )
+        print(f"Fetched pages with revisions (debug pageids): {len(pages_by_id)}")
     else:
         fetch_fn = _QUERY_STRATEGIES[args.query]
         pageids, pages_by_id, curtimestamp = fetch_fn(
@@ -955,9 +525,8 @@ def run_normalization_workflow(
         template_preferred_map=template_preferred_map,
     )
 
-    result_msg = (f"Done. processed={processed}, changed={changed}, "
-                  f"skipped_bots={skipped_bots}, failed={failed}")
-    print(result_msg)
+    print(f"Done. processed={processed}, changed={changed}, "
+          f"skipped_bots={skipped_bots}, failed={failed}")
     return 0 if failed == 0 else 2
 
 
@@ -974,7 +543,6 @@ def execute(args: argparse.Namespace) -> int:
                 f"Unknown query strategy: {args.query!r}. Valid: {valid}")
         args.query = QUERY_ALIASES[args.query]
 
-        # Resolve env-backed optional CLI args.
         # Boolean flags: CLI flag (True) wins; otherwise fall back to env var.
         if not args.to13:
             args.to13 = _parse_bool_env("TO13", default=False)
@@ -982,7 +550,7 @@ def execute(args: argparse.Namespace) -> int:
             args.rehyphenate_equal_label = _parse_bool_env(
                 "REHYPHENATE_EQUAL_LABEL", default=False)
 
-        # String args: non-empty CLI value wins; otherwise env var; then built-in default.
+        # String args: non-empty CLI value > env var > built-in default.
         if not args.template_title:
             args.template_title = os.environ.get("TEMPLATE_TITLE",
                                                  _FALLBACK_TEMPLATE_TITLE)
@@ -991,8 +559,7 @@ def execute(args: argparse.Namespace) -> int:
         if not args.summary:
             args.summary = os.environ.get("SUMMARY", _DEFAULT_SUMMARY)
 
-        wiki_api, bot_username, bot_password, user_agent = parse_runtime_config(
-            args)
+        wiki_api, bot_username, bot_password, user_agent = parse_runtime_config(args)
         xml_path = validate_xml_path(args.xml)
         session = build_session(user_agent)
 
@@ -1018,30 +585,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="MediaWiki runner for ISBN template normalization.")
     parser.add_argument(
-        "--xml",
-        default=None,
+        "--xml", default=None,
         help="Path to ISBNRangeMessage XML file. Overrides XML_PATH in .env.",
     )
     parser.add_argument(
-        "-to13",
-        "--to13",
-        action="store_true",
-        default=False,
+        "-to13", "--to13", action="store_true", default=False,
         help="Convert ISBN-10 template values to ISBN-13 before output. "
         "Overrides TO13 in .env.",
     )
     parser.add_argument(
-        "--rehyphenate-equal-label",
-        action="store_true",
-        default=False,
+        "--rehyphenate-equal-label", action="store_true", default=False,
         help=(
             "When template param1 and param2 are semantically the same ISBN, "
             "replace the template with {{ISBNT|$1}} and keep parameter 1 "
             "hyphenated. Overrides REHYPHENATE_EQUAL_LABEL in .env."),
     )
     parser.add_argument(
-        "--query",
-        "-q",
+        "--query", "-q",
         choices=list(QUERY_ALIASES),
         metavar="{transcludedin|ti|booksource-search|booksource|bs}",
         default=None,
@@ -1049,45 +609,37 @@ def build_parser() -> argparse.ArgumentParser:
         "Default: DEFAULT_QUERY env var (from .env), or 'transcludedin' if unset.",
     )
     parser.add_argument(
-        "--wiki-api",
-        default=None,
+        "--wiki-api", default=None,
         help="MediaWiki API endpoint. Overrides WIKI_API in .env.",
     )
     parser.add_argument(
-        "--bot-username",
-        default=None,
+        "--bot-username", default=None,
         help="Bot username. Overrides BOT_USERNAME in .env.pwd.",
     )
     parser.add_argument(
-        "--bot-password",
-        default=None,
+        "--bot-password", default=None,
         help="Bot password. Overrides BOT_PASSWORD in .env.pwd.",
     )
     parser.add_argument(
-        "--user-agent",
-        default=None,
+        "--user-agent", default=None,
         help="HTTP User-Agent. Overrides USER_AGENT in .env.",
     )
     parser.add_argument(
-        "--template-title",
-        default=None,
+        "--template-title", default=None,
         help="Template title(s) for transclusion lookup. "
         "Overrides TEMPLATE_TITLE in .env.",
     )
     parser.add_argument(
-        "--summary",
-        default=None,
-        help="Edit summary used when saving pages. Overrides SUMMARY in .env.",
+        "--summary", default=None,
+        help="ISO 2108 notice appended to every edit summary. "
+        "Overrides SUMMARY in .env.",
     )
     parser.add_argument(
-        "--dry-run",
-        action="store_true",
+        "--dry-run", action="store_true",
         help="Run full workflow but do not save edits.",
     )
     parser.add_argument(
-        "--max-edits",
-        type=int,
-        default=None,
+        "--max-edits", type=int, default=None,
         help="Maximum number of edits to perform. Omit for unlimited.",
     )
     return parser
