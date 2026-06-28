@@ -42,6 +42,7 @@ DEFAULT_USER_AGENT = (
 DEFAULT_WIKI_API = "https://mzh.moegirl.org.cn/api.php"
 _FALLBACK_TEMPLATE_TITLE = "Template:ISBN|Template:ISBNT|Template:Cite book"
 _FALLBACK_XML_PATH = "RangeMessage.xml"
+_FALLBACK_EDIT_TAGS = "Bot"
 _DEFAULT_SUMMARY = (
     "根据 ISO 2108:2017（https://www.iso.org/standard/65483.html ）自动"
     "调整ISBN（若阁下对此次修改感到疑惑，可以前往 https://grp.isbn-international.org/"
@@ -337,6 +338,7 @@ def _try_apply_changes(
             bot=_USE_BOT_FLAG,
             baserevid=baserevid,
             starttimestamp=start_timestamp,
+            tags=args.edit_tags,
         )
         print(
             f"[EDITED] pageid={pageid} title={title} replacements={replacements}"
@@ -560,6 +562,11 @@ def execute(args: argparse.Namespace) -> int:
             args.xml = os.environ.get("XML_PATH", _FALLBACK_XML_PATH)
         if not args.summary:
             args.summary = os.environ.get("SUMMARY", _DEFAULT_SUMMARY)
+        # edit_tags uses `is None` (not `not`) so that an explicit empty string
+        # from the CLI is honoured as "apply no tags" rather than overridden by
+        # the env default.
+        if args.edit_tags is None:
+            args.edit_tags = os.environ.get("EDIT_TAGS", _FALLBACK_EDIT_TAGS)
 
         wiki_api, bot_username, bot_password, user_agent = parse_runtime_config(
             args)
@@ -649,6 +656,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="ISO 2108 notice appended to every edit summary. "
         "Overrides SUMMARY in .env.",
+    )
+    parser.add_argument(
+        "--edit-tags",
+        default=None,
+        help="Change tag(s) applied to edits, pipe-separated (e.g. 'Bot|test'). "
+        "Pass an empty string to apply no tag. "
+        "Overrides EDIT_TAGS in .env.",
     )
     parser.add_argument(
         "--dry-run",

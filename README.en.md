@@ -167,7 +167,7 @@ File: `.github/workflows/update-rangemessage.yml`
   - Manual trigger (`workflow_dispatch`)
   - Weekly scheduled run every Wednesday at UTC `03:05` (cron: `05 3 * * 3`)
 
-2. **Behavior**
+2. **Behaviour**
   - Downloads the latest `RangeMessage.xml`
   - Commits and pushes only when the file content changes
 
@@ -182,7 +182,7 @@ File: `.github/workflows/update-booksource-aliases.yml`
   - Manual trigger (`workflow_dispatch`)
   - Biannual scheduled run on January 1st and July 1st at UTC `03:05` (cron: `05 3 1 1,7 *`)
 
-2. **Behavior**
+2. **Behaviour**
   - Fetches all localised aliases for the `Booksources` special page from the MoegirlPedia API
   - Canonicalises them (casefold, strip spaces and underscores) and updates the `BOOKSOURCE_PAGE_ALIASES` constant in `isbn_template_normalise.py` in-place
   - Idempotent — commits only when the value actually changes
@@ -253,18 +253,20 @@ XML_PATH=RangeMessage.xml
 REHYPHENATE_EQUAL_LABEL=false
 TO13=false
 SUMMARY=根据 ISO 2108:2017（...）自动调整ISBN（...）
+EDIT_TAGS=Bot
 ```
 
 | Variable | CLI flag | Description |
 |----------|----------|-------------|
 | `WIKI_API` | `--wiki-api` | MediaWiki API endpoint |
 | `USER_AGENT` | `--user-agent` | HTTP User-Agent string |
-| `TEMPLATE_TITLE` | `--template-title` | Template name(s), `|`-separated |
+| `TEMPLATE_TITLE` | `--template-title` | Template name(s), `\|`-separated |
 | `DEFAULT_QUERY` | `--query` / `-q` | Default fetch strategy |
 | `XML_PATH` | `--xml` | Path to RangeMessage.xml |
 | `REHYPHENATE_EQUAL_LABEL` | `--rehyphenate-equal-label` | Merge semantically equal params into ISBNT |
 | `TO13` | `-to13` | Convert ISBN-10 to ISBN-13 |
 | `SUMMARY` | `--summary` | ISO 2108 notice appended to every edit summary |
+| `EDIT_TAGS` | `--edit-tags` | Change tag(s) applied to edits; multiple tags are pipe-separated (e.g. `Bot\|test`); set to an empty string to apply no tag |
 
 To adapt to a different wiki, edit this file and commit the change. All fields can be overridden temporarily via the corresponding CLI flag.
 

@@ -455,6 +455,7 @@ def edit_page_text(
     bot: bool,
     baserevid: str = "",
     starttimestamp: str = "",
+    tags: str = "Bot",
 ) -> dict[str, Any]:
     data: dict[str, Any] = {
         "action": "edit",
@@ -465,9 +466,10 @@ def edit_page_text(
         "text": text,
         "summary": summary,
         "token": csrf_token,
-        "tags": "Bot",
         "minor": 1,
     }
+    if tags:
+        data["tags"] = tags
     if bot:
         data["bot"] = "1"
     if baserevid:

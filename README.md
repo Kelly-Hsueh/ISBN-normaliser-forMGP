@@ -253,6 +253,7 @@ XML_PATH=RangeMessage.xml
 REHYPHENATE_EQUAL_LABEL=false
 TO13=false
 SUMMARY=根据 ISO 2108:2017（...）自动调整ISBN（...）
+EDIT_TAGS=Bot
 ```
 
 | 变量 | 对应 CLI 参数 | 说明 |
@@ -265,6 +266,7 @@ SUMMARY=根据 ISO 2108:2017（...）自动调整ISBN（...）
 | `REHYPHENATE_EQUAL_LABEL` | `--rehyphenate-equal-label` | 语义相同时合并为 ISBNT |
 | `TO13` | `-to13` | 将 ISBN-10 转换为 ISBN-13 |
 | `SUMMARY` | `--summary` | ISO 2108 说明文字（附加于每条摘要末尾） |
+| `EDIT_TAGS` | `--edit-tags` | 编辑时附加的变更标签；多个标签以 `\|` 分隔（如 `Bot\|test`），留空则不附加任何标签 |
 
 如需适配其他 wiki，修改后提交即可。所有字段均可通过对应命令行参数临时覆盖。
 
