@@ -155,7 +155,7 @@ def collect_booksource_search_pageids(
             )
         except RuntimeError as exc:
             print(
-                f"[WARNING] insource search failed for {alias!r}: {exc}",
+                f"\033[91m[WARNING] insource search failed for {alias!r}: {exc}\033[0m",
                 file=sys.stderr,
             )
             found = set()
@@ -347,14 +347,16 @@ def _try_apply_changes(
         return True, False
     except RuntimeError as exc:
         if "editconflict" not in str(exc):
-            print(f"[FAILED] pageid={pageid} title={title} error={exc}",
-                  file=sys.stderr)
+            print(
+                f"\033[91m[FAILED] pageid={pageid} title={title} error={exc}\033[0m",
+                file=sys.stderr)
             return False, True
-        print(f"[SKIP][conflict] pageid={pageid} title={title}")
+        print(f"\033[93m[SKIP][conflict] pageid={pageid} title={title}\033[0m")
         return False, False
     except Exception as exc:
-        print(f"[FAILED] pageid={pageid} title={title} error={exc}",
-              file=sys.stderr)
+        print(
+            f"\033[91m[FAILED] pageid={pageid} title={title} error={exc}\033[0m",
+            file=sys.stderr)
         return False, True
 
 
@@ -392,7 +394,9 @@ def process_pages(
         skip_reason = get_skip_reason(content, assert_user)
         if skip_reason is not None:
             skipped_bots += 1
-            print(f"[SKIP][{skip_reason}] pageid={pageid} title={title}")
+            print(
+                f"\033[93m[SKIP][{skip_reason}] pageid={pageid} title={title}\033[0m"
+            )
             continue
 
         new_text, report = normalise_page_isbn_templates(
@@ -406,7 +410,7 @@ def process_pages(
 
         if args.max_edits is not None and changed >= args.max_edits:
             print(
-                f"[LIMIT] Reached max_edits limit ({args.max_edits}), stopping."
+                f"\033[93m[LIMIT] Reached max_edits limit ({args.max_edits}), stopping.\033[0m"
             )
             break
 

@@ -358,7 +358,8 @@ def fetch_transcluded_pages_with_revisions(
 
         if warnings := response_data.get("warnings", {}).get("result", {}):
             if warning_msg := warnings.get("warnings", ""):
-                print(f"[API WARNING] {warning_msg}", file=sys.stderr)
+                print(f"\033[93m[API WARNING] {warning_msg}\033[0m",
+                      file=sys.stderr)
 
         if not curtimestamp and isinstance(response_data.get("curtimestamp"),
                                            str):
