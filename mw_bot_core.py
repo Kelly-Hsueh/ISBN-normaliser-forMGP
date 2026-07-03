@@ -9,8 +9,10 @@ import contextlib
 import json
 import os
 import re
+import sys
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import brotli
 import requests
@@ -21,6 +23,14 @@ import requests
 
 _MAXLAG: int = 3
 _TIMEOUT: int = 30
+_MAX_RETRIES: int = 3
+_RETRY_BACKOFF_BASE: float = 2.0
+
+_TRANSIENT_ERRORS = (
+    requests.exceptions.Timeout,
+    requests.exceptions.ConnectionError,
+    requests.exceptions.ChunkedEncodingError,
+)
 
 # ---------------------------------------------------------------------------
 # Environment loading
@@ -89,6 +99,35 @@ def _parse_bool_env(key: str, *, default: bool) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _request_with_retry(
+    make_request: Callable[[], requests.Response],
+    error_context: str,
+) -> requests.Response:
+    """Retry *make_request* on transient network errors with backoff.
+
+    Only retries on connection-level failures (timeout, connection reset,
+    chunked encoding errors) — not on HTTP error status codes or JSON
+    decoding issues, which are handled by their respective callers.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            return make_request()
+        except _TRANSIENT_ERRORS as exc:
+            last_exc = exc
+            if attempt >= _MAX_RETRIES:
+                break
+            wait = _RETRY_BACKOFF_BASE * (2**attempt)
+            print(
+                f"[RETRY] {error_context}: attempt {attempt + 1} failed ({last_exc}); "
+                f"retrying in {wait:.1f}s",
+                file=sys.stderr,
+            )
+            time.sleep(wait)
+    assert last_exc is not None
+    raise last_exc
+
+
 def safe_get_json(response: requests.Response) -> dict[str, Any]:
     try:
         data = response.json()
@@ -134,7 +173,10 @@ def api_get_json(
     error_context: str,
 ) -> dict[str, Any]:
     try:
-        response = session.get(wiki_api, params=params, timeout=timeout)
+        response = _request_with_retry(
+            lambda: session.get(wiki_api, params=params, timeout=timeout),
+            error_context,
+        )
         response.raise_for_status()
         return parse_response_json(response)
     except Exception as exc:
@@ -149,7 +191,10 @@ def api_post_json(
     error_context: str,
 ) -> dict[str, Any]:
     try:
-        response = session.post(wiki_api, data=data, timeout=timeout)
+        response = _request_with_retry(
+            lambda: session.post(wiki_api, data=data, timeout=timeout),
+            error_context,
+        )
         response.raise_for_status()
         return parse_response_json(response)
     except Exception as exc:
@@ -323,7 +368,6 @@ def fetch_transcluded_pages_with_revisions(
     wiki_api: str,
     template_title: str,
 ) -> tuple[list[int], dict[int, dict[str, Any]], str]:
-    import sys
     pageids: list[int] = []
     seen: set[int] = set()
     pages_by_id: dict[int, dict[str, Any]] = {}
