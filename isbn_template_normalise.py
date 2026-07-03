@@ -238,6 +238,8 @@ def normalise_cite_book_isbn_templates(
             continue
 
         isbn_param.value = normalised_value
+        if str(isbn_param.name).strip() != "isbn":
+            isbn_param.name = "isbn"  # Normalise a non-lowercase parameter name
         if convert_10_to_13 and _is_isbn10_input(raw_value):
             report.isbn10_converted += 1
         else:
