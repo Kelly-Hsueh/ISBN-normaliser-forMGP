@@ -28,6 +28,7 @@ from mw_bot_core import (
     load_env_files,
     login_with_bot_password,
     normalise_assert_user,
+    purge_embedding_pages,
 )
 from isbn_template_normalise import (
     BOOKSOURCE_PAGE_ALIASES,
@@ -127,6 +128,25 @@ def update_status_page(
     except Exception as exc:
         print(
             f"\033[93m[WARNING] Failed to update status page to {status!r}: {exc}\033[0m",
+            file=sys.stderr,
+        )
+        return
+
+    # User: namespace pages (unlike Template:) don't auto-invalidate the
+    # parser cache of pages transcluding them, so purge explicitly.
+    try:
+        purged_count = purge_embedding_pages(
+            session=session,
+            wiki_api=wiki_api,
+            title=title,
+        )
+        print(
+            f"[STATUS] purged {purged_count} page(s) embedding \'/{_STATUS_SUBPAGE}\'"
+        )
+    except Exception as exc:
+        print(
+            f"\033[93m[WARNING] Failed to purge pages embedding "
+            f"\'/{_STATUS_SUBPAGE}\': {exc}\033[0m",
             file=sys.stderr,
         )
 

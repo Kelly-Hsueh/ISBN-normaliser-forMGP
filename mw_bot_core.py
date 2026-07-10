@@ -584,3 +584,51 @@ def edit_page_by_title(
         raise RuntimeError(
             f"API edit error for title={title!r}: {result['error']}")
     return result
+
+
+def purge_embedding_pages(
+    session: requests.Session,
+    wiki_api: str,
+    title: str,
+) -> int:
+    """Purge the parser cache of every page transcluding *title*.
+
+    Pages outside the Template namespace (e.g. User: subpages) do not get
+    their embedding pages automatically invalidated on edit the way
+    templates do, so callers who overwrite a transcluded non-template page
+    must purge its embedders manually. Handles API continuation and
+    returns the number of pages purged.
+    """
+    purged = 0
+    request_data: dict[str, Any] = {
+        "action": "purge",
+        "format": "json",
+        "formatversion": 2,
+        "maxlag": _MAXLAG,
+        "generator": "embeddedin",
+        "geititle": title,
+        "geilimit": "max",
+    }
+
+    while True:
+        response_data = api_post_json(
+            session=session,
+            wiki_api=wiki_api,
+            data=request_data,
+            timeout=_TIMEOUT,
+            error_context=f"Failed to purge pages embedding {title!r}",
+        )
+        if "error" in response_data:
+            raise RuntimeError(
+                f"API error on purge for {title!r}: {response_data['error']}")
+
+        purge_result = response_data.get("purge", [])
+        if isinstance(purge_result, list):
+            purged += len(purge_result)
+
+        cont = response_data.get("continue")
+        if not isinstance(cont, dict):
+            break
+        request_data |= cont
+
+    return purged
