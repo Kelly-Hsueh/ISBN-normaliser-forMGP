@@ -537,3 +537,50 @@ def edit_page_text(
         raise RuntimeError(
             f"API edit error for pageid={pageid}: {result['error']}")
     return result
+
+
+def edit_page_by_title(
+    session: requests.Session,
+    wiki_api: str,
+    title: str,
+    text: str,
+    summary: str,
+    csrf_token: str,
+    assert_user: str,
+    bot: bool = False,
+    tags: str = "Bot",
+) -> dict[str, Any]:
+    """Overwrite a page identified by *title* (not pageid) with *text*.
+
+    Unlike edit_page_text, this does not take a baserevid/starttimestamp:
+    it's meant for simple, low-stakes status-page style overwrites (e.g.
+    Special:MyPage/Status) where edit-conflict protection is unnecessary
+    and the page may not exist yet.
+    """
+    data: dict[str, Any] = {
+        "action": "edit",
+        "format": "json",
+        "maxlag": _MAXLAG,
+        "assertuser": assert_user,
+        "title": title,
+        "text": text,
+        "summary": summary,
+        "token": csrf_token,
+        "minor": 1,
+    }
+    if tags:
+        data["tags"] = tags
+    if bot:
+        data["bot"] = "1"
+
+    result = api_post_json(
+        session=session,
+        wiki_api=wiki_api,
+        data=data,
+        timeout=_TIMEOUT,
+        error_context=f"Failed to edit title={title!r}",
+    )
+    if "error" in result:
+        raise RuntimeError(
+            f"API edit error for title={title!r}: {result['error']}")
+    return result

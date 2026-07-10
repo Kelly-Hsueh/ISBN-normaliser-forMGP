@@ -18,6 +18,7 @@ from mw_bot_core import (
     allowbots,
     api_post_json,
     build_session,
+    edit_page_by_title,
     edit_page_text,
     extract_baserevid,
     extract_main_content,
@@ -52,6 +53,15 @@ _DEFAULT_SUMMARY = (
 _EDIT_INTERVAL: float = 0.2
 _USE_BOT_FLAG: bool = True
 
+# Status-page constants (fun little feature): the bot advertises its own
+# run state on a subpage of its own userpage. Special:MyPage is a client-side
+# redirect and cannot be targeted by action=edit directly, so the real
+# title is built at runtime as f"User:{assert_user}/{_STATUS_SUBPAGE}".
+_STATUS_SUBPAGE: str = "Status"
+_STATUS_BUSY: str = "busy"
+_STATUS_IDLE: str = "holiday"
+_STATUS_SUMMARY_TEMPLATE: str = "修改状态为 - {status}"
+
 # Debug-only override: when non-empty, only these pageids are fetched and processed.
 # Example: DEBUG_TARGET_PAGEIDS = [12345, 67890]
 DEBUG_TARGET_PAGEIDS: list[int] = []
@@ -64,6 +74,62 @@ QUERY_ALIASES: dict[str, str] = {
     "booksource": "booksource-search",
     "bs": "booksource-search",
 }
+
+# ---------------------------------------------------------------------------
+# Status page helper
+# ---------------------------------------------------------------------------
+
+
+def build_status_page_title(assert_user: str) -> str:
+    """Build the real (non-Special:) status subpage title for *assert_user*.
+
+    Special:MyPage/Status is a client-side redirect to the current user's
+    own userpage and cannot be targeted by action=edit, so we resolve it
+    to the concrete User: page ourselves.
+    """
+    return f"User:{assert_user}/{_STATUS_SUBPAGE}"
+
+
+def update_status_page(
+    session: requests.Session,
+    wiki_api: str,
+    csrf_token: str,
+    assert_user: str,
+    status: str,
+    dry_run: bool,
+    edit_tags: str,
+) -> None:
+    """Overwrite the bot's status subpage with *status*, best-effort.
+
+    This is a cosmetic feature: failures are logged but never abort the
+    bot's main workflow.
+    """
+    title = build_status_page_title(assert_user)
+    summary = _STATUS_SUMMARY_TEMPLATE.format(status=status)
+
+    if dry_run:
+        print(f"[DRY-RUN][STATUS] {title} -> {status!r}")
+        return
+
+    try:
+        edit_page_by_title(
+            session=session,
+            wiki_api=wiki_api,
+            title=title,
+            text=status,
+            summary=summary,
+            csrf_token=csrf_token,
+            assert_user=assert_user,
+            bot=_USE_BOT_FLAG,
+            tags=edit_tags,
+        )
+        print(f"[STATUS] {title} -> {status!r}")
+    except Exception as exc:
+        print(
+            f"\033[93m[WARNING] Failed to update status page to {status!r}: {exc}\033[0m",
+            file=sys.stderr,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Page skip logic
@@ -496,46 +562,70 @@ def run_normalisation_workflow(
         assert_user=assert_user,
     )
 
-    template_preferred_map = resolve_template_aliases(
+    # Fun little feature: announce ourselves as busy on our status subpage
+    # as soon as we're logged in and hold a CSRF token.
+    update_status_page(
         session=session,
         wiki_api=wiki_api,
-        template_titles=args.template_title,
+        csrf_token=csrf_token,
+        assert_user=assert_user,
+        status=_STATUS_BUSY,
+        dry_run=args.dry_run,
+        edit_tags=args.edit_tags,
     )
 
-    if DEBUG_TARGET_PAGEIDS:
-        pageids, pages_by_id, curtimestamp = fetch_pages_by_pageids_with_revisions(
+    try:
+        template_preferred_map = resolve_template_aliases(
             session=session,
             wiki_api=wiki_api,
-            pageids=DEBUG_TARGET_PAGEIDS,
+            template_titles=args.template_title,
         )
-        print(
-            f"Fetched pages with revisions (debug pageids): {len(pages_by_id)}"
-        )
-    else:
-        fetch_fn = _QUERY_STRATEGIES[args.query]
-        pageids, pages_by_id, curtimestamp = fetch_fn(
-            session,
-            wiki_api,
-            args.template_title,
-        )
-        print(f"Fetched pages ({args.query}): {len(pages_by_id)}")
 
-    processed, skipped_bots, changed, failed = process_pages(
-        args=args,
-        session=session,
-        wiki_api=wiki_api,
-        bot_username=bot_username,
-        xml_path=xml_path,
-        pageids=pageids,
-        pages_by_id=pages_by_id,
-        csrf_token=csrf_token,
-        start_timestamp=curtimestamp,
-        template_preferred_map=template_preferred_map,
-    )
+        if DEBUG_TARGET_PAGEIDS:
+            pageids, pages_by_id, curtimestamp = fetch_pages_by_pageids_with_revisions(
+                session=session,
+                wiki_api=wiki_api,
+                pageids=DEBUG_TARGET_PAGEIDS,
+            )
+            print(
+                f"Fetched pages with revisions (debug pageids): {len(pages_by_id)}"
+            )
+        else:
+            fetch_fn = _QUERY_STRATEGIES[args.query]
+            pageids, pages_by_id, curtimestamp = fetch_fn(
+                session,
+                wiki_api,
+                args.template_title,
+            )
+            print(f"Fetched pages ({args.query}): {len(pages_by_id)}")
 
-    print(f"Done. processed={processed}, changed={changed}, "
-          f"skipped_bots={skipped_bots}, failed={failed}")
-    return 0 if failed == 0 else 2
+        processed, skipped_bots, changed, failed = process_pages(
+            args=args,
+            session=session,
+            wiki_api=wiki_api,
+            bot_username=bot_username,
+            xml_path=xml_path,
+            pageids=pageids,
+            pages_by_id=pages_by_id,
+            csrf_token=csrf_token,
+            start_timestamp=curtimestamp,
+            template_preferred_map=template_preferred_map,
+        )
+
+        print(f"Done. processed={processed}, changed={changed}, "
+              f"skipped_bots={skipped_bots}, failed={failed}")
+        return 0 if failed == 0 else 2
+    finally:
+        # Always try to flip back to idle before we exit, success or not.
+        update_status_page(
+            session=session,
+            wiki_api=wiki_api,
+            csrf_token=csrf_token,
+            assert_user=assert_user,
+            status=_STATUS_IDLE,
+            dry_run=args.dry_run,
+            edit_tags=args.edit_tags,
+        )
 
 
 def execute(args: argparse.Namespace) -> int:
