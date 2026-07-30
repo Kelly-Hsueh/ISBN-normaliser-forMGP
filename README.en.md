@@ -47,7 +47,7 @@ Quick install:
 
 ```bash
 python -m pip install --upgrade pip
-pip install requests brotli mwparserfromhell
+pip install -r requirements.txt
 ```
 
 ## Quick Start
@@ -56,7 +56,7 @@ pip install requests brotli mwparserfromhell
 git clone https://github.com/Kelly-Hsueh/ISBN-normaliser-forMGP.git
 cd ISBN-normaliser-forMGP
 python -m pip install --upgrade pip
-pip install requests brotli mwparserfromhell
+pip install -r requirements.txt
 ```
 
 Then ensure `RangeMessage.xml` is available (already included in this repository), and run the commands below.
@@ -308,7 +308,7 @@ CLI flag > system env var (including GHA env: injection) > .env.pwd > .env > bui
 ## Troubleshooting
 
 - `ModuleNotFoundError`:
-  - Run `pip install requests brotli mwparserfromhell`
+  - Run `pip install -r requirements.txt`
 
 - `RangeMessage.xml` not found:
   - Ensure the file exists in the current directory, or pass the correct path using `--xml`

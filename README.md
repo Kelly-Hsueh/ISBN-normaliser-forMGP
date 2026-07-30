@@ -47,7 +47,7 @@
 
 ```bash
 python -m pip install --upgrade pip
-pip install requests brotli mwparserfromhell
+pip install -r requirements.txt
 ```
 
 ## 快速开始
@@ -56,7 +56,7 @@ pip install requests brotli mwparserfromhell
 git clone https://github.com/Kelly-Hsueh/ISBN-normaliser-forMGP.git
 cd ISBN-normaliser-forMGP
 python -m pip install --upgrade pip
-pip install requests brotli mwparserfromhell
+pip install -r requirements.txt
 ```
 
 然后准备 `RangeMessage.xml`（仓库已包含），即可按下文命令运行。
@@ -308,7 +308,7 @@ Secrets 中仅需配置 `BOT_USERNAME` 与 `BOT_PASSWORD`。公共配置由 `act
 ## 故障排查
 
 - 报错 `ModuleNotFoundError`：
-  - 先执行 `pip install requests brotli mwparserfromhell`
+  - 先执行 `pip install -r requirements.txt`
 
 - 报错找不到 `RangeMessage.xml`：
   - 确认当前目录存在该文件，或通过 `--xml` 指定正确路径
