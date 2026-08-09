@@ -294,14 +294,16 @@ CLI flag > system env var (including GHA env: injection) > .env.pwd > .env > bui
 - Always normalise template parameter 1 (when valid)
 - Keep parameter 2 unchanged by default
 - Only when explicitly enabled and semantically identical: rewrite the template as `{{ISBNT|$1}}` and keep parameter 1 hyphenated
-- Edit summaries are composed automatically per page based on the actual types of changes made, with components joined by fullwidth semicolons (`；`) and the ISO 2108 notice always appended last:
+- Edit summaries are composed automatically per page based on the actual types of changes made, with components joined by fullwidth semicolons (`；`):
 
   | Trigger | Summary component |
   |---------|-------------------|
   | Replaced `[[Special:BookSources/…]]` links | `替换[[Special:BookSources/]]为{{[[T:ISBN\|ISBN]]}}` |
   | Converted ISBN-10 to ISBN-13 | `将 ISBN-10 转换为 ISBN-13` |
   | Merged semantically equal params into `{{ISBNT}}` | `自动使用{{[[T:ISBNT\|ISBNT]]}}` |
-  | Any change (always appended) | `根据 ISO 2108:2017（…）自动调整ISBN（…）` |
+  | An ISBN's **actual value formatting** changed | `根据 ISO 2108:2017（…）自动调整ISBN（…）` |
+
+  Note on the last row: plain hyphen normalisation and ISBN-10→13 conversion always imply an actual value change, so this notice is always appended for those. BookSources link replacement and ISBNT merges, however, can be purely structural (a link becoming a template, or a template being renamed) when the underlying ISBN was already correctly formatted — in that case the notice is skipped so the summary doesn't reference a change that didn't happen.
 
   The ISO 2108 notice text is configurable via the `SUMMARY` env var or `--summary` flag.
 

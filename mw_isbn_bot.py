@@ -369,7 +369,13 @@ def compose_summary(report: ChangeReport, iso_summary: str) -> str:
       - booksource link replacement (if any)
       - ISBN-10 → ISBN-13 conversion (if any)
       - {{ISBNT}} merge (if any)
-      - ISO 2108 hyphenation notice (always, since every change touches ISBNs)
+      - ISO 2108 hyphenation notice, but only if an ISBN value's actual
+        format changed. isbn_normalised/isbn10_converted always imply this;
+        booksource_links/isbnt_merged can be pure structural swaps (a
+        link becoming a template, or a template being renamed to ISBNT)
+        with an already-correctly-formatted code, so those two alone don't
+        justify the notice — isbn_reformatted tracks whether they, too,
+        touched an ISBN's actual formatting.
     """
     parts: list[str] = []
     if report.booksource_links:
@@ -379,7 +385,9 @@ def compose_summary(report: ChangeReport, iso_summary: str) -> str:
         parts.append("将 ISBN-10 转换为 ISBN-13")
     if report.isbnt_merged:
         parts.append("自动使用{{[[T:ISBNT|ISBNT]]}}")
-    parts.append(iso_summary)
+    if (report.isbn_normalised or report.isbn10_converted
+            or report.isbn_reformatted):
+        parts.append(iso_summary)
     return "；".join(parts)
 
 

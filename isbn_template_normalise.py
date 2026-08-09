@@ -37,6 +37,14 @@ class ChangeReport:
     isbn_normalised: int = 0  # hyphen-only normalisation (incl. Cite book)
     isbn10_converted: int = 0  # ISBN-10 → ISBN-13 conversion
     isbnt_merged: int = 0  # semantically-equal params → {{ISBNT|…}}
+    # Auxiliary flag, deliberately excluded from `total`: set when a
+    # booksource_links or isbnt_merged change *also* altered an ISBN
+    # value's actual formatting, as opposed to being a pure link→template
+    # swap or template→ISBNT rename where the code was already correctly
+    # formatted. Lets compose_summary() decide whether the ISO 2108 notice
+    # is warranted, since isbn_normalised/isbn10_converted always imply an
+    # actual format change on their own.
+    isbn_reformatted: int = 0
 
     @property
     def total(self) -> int:
@@ -49,6 +57,7 @@ class ChangeReport:
             isbn_normalised=self.isbn_normalised + other.isbn_normalised,
             isbn10_converted=self.isbn10_converted + other.isbn10_converted,
             isbnt_merged=self.isbnt_merged + other.isbnt_merged,
+            isbn_reformatted=self.isbn_reformatted + other.isbn_reformatted,
         )
 
 
@@ -274,6 +283,11 @@ def replace_booksource_links_with_isbn_templates(
         if not label_raw:
             continue
 
+        # Track whether an ISBN *value* actually changes shape here, as
+        # opposed to this being a pure link→template swap of an
+        # already-correctly-formatted code (see ChangeReport.isbn_reformatted).
+        value_reformatted = normalised_link_isbn != link_isbn_raw.strip()
+
         label_isbn_raw = split_isbn_prefixed_label(label_raw)
 
         preferred_template = "ISBN"
@@ -286,6 +300,10 @@ def replace_booksource_links_with_isbn_templates(
         if label_isbn_raw is not None:
             label_isbn_normalised = normalise_if_isbn(label_isbn_raw, groups,
                                                       convert_10_to_13)
+            if label_isbn_normalised is not None:
+                value_reformatted = (value_reformatted
+                                     or label_isbn_normalised
+                                     != label_isbn_raw.strip())
             if (label_isbn_normalised is not None
                     and are_semantically_equal_isbns(link_isbn_raw,
                                                      label_isbn_raw)):
@@ -302,6 +320,10 @@ def replace_booksource_links_with_isbn_templates(
         else:
             label_isbn_normalised = normalise_if_isbn(label_raw, groups,
                                                       convert_10_to_13)
+            if label_isbn_normalised is not None:
+                value_reformatted = (value_reformatted
+                                     or label_isbn_normalised
+                                     != label_raw.strip())
             replacement = build_isbn_template_node(
                 normalised_link_isbn,
                 label_isbn_normalised
@@ -311,6 +333,8 @@ def replace_booksource_links_with_isbn_templates(
 
         code.replace(wikilink, replacement)
         report.booksource_links += 1
+        if value_reformatted:
+            report.isbn_reformatted += 1
 
     return report
 
@@ -372,6 +396,8 @@ def normalise_isbn_templates(
                 preferred_isbnt = None
             if preferred_isbnt:
                 template.name = preferred_isbnt
+            if normalised_1 != code_str:
+                report.isbn_reformatted += 1
             template.get("1").value = normalised_1
             if template.has("2"):
                 template.remove("2")
