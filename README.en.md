@@ -30,6 +30,7 @@ A standalone normalisation tool and MediaWiki bot for the {{[ISBN](https://mzh.m
   - Allowbots compliance check before editing
   - Configurable edit count limit per run
   - Automatically composes per-page edit summaries based on the actual types of changes made
+  - Optional: writes run status (busy/holiday) to a `User:<bot>/Status` subpage (**off by default**, see `UPDATE_STATUS_PAGE`)
 
 ## Dependencies
 
@@ -254,6 +255,7 @@ REHYPHENATE_EQUAL_LABEL=false
 TO13=false
 SUMMARY=根据 ISO 2108:2017（...）自动调整ISBN（...）
 EDIT_TAGS=Bot
+UPDATE_STATUS_PAGE=false
 ```
 
 | Variable | CLI flag | Description |
@@ -267,6 +269,11 @@ EDIT_TAGS=Bot
 | `TO13` | `-to13` | Convert ISBN-10 to ISBN-13 |
 | `SUMMARY` | `--summary` | ISO 2108 notice appended to every edit summary |
 | `EDIT_TAGS` | `--edit-tags` | Change tag(s) applied to edits; multiple tags are pipe-separated (e.g. `Bot\|test`); set to an empty string to apply no tag |
+| `UPDATE_STATUS_PAGE` | `--update-status-page` | Enable the bot status subpage feature (writes busy/holiday to `User:<bot>/Status`); **off by default**, must be explicitly set to `true` |
+
+> [!NOTE]
+> `UPDATE_STATUS_PAGE` defaults to off because this feature writes a subpage under the bot's own userpage — something a fork running under a different bot account may not want. 
+> This repository's shipped `.env` sets it to `true` (the upstream bot's own default); if you fork this project, keep or reset it as appropriate for your deployment.
 
 To adapt to a different wiki, edit this file and commit the change. All fields can be overridden temporarily via the corresponding CLI flag.
 

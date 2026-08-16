@@ -58,6 +58,10 @@ _USE_BOT_FLAG: bool = True
 # run state on a subpage of its own userpage. Special:MyPage is a client-side
 # redirect and cannot be targeted by action=edit directly, so the real
 # title is built at runtime as f"User:{assert_user}/{_STATUS_SUBPAGE}".
+#
+# Opt-in: this feature is off by default (UPDATE_STATUS_PAGE / --update-status-page),
+# since forks/other deployments of this bot may not want it, or may not have
+# a userpage set up for it.
 _STATUS_SUBPAGE: str = "Status"
 _STATUS_BUSY: str = "busy"
 _STATUS_IDLE: str = "holiday"
@@ -99,12 +103,19 @@ def update_status_page(
     status: str,
     dry_run: bool,
     edit_tags: str,
+    enabled: bool,
 ) -> None:
     """Overwrite the bot's status subpage with *status*, best-effort.
 
-    This is a cosmetic feature: failures are logged but never abort the
-    bot's main workflow.
+    This is a cosmetic, opt-in feature: when *enabled* is False (the
+    default), this is a no-op — no request is made and nothing is printed,
+    so deployments that don't want a public status page are unaffected.
+    When enabled, failures are logged but never abort the bot's main
+    workflow.
     """
+    if not enabled:
+        return
+
     title = build_status_page_title(assert_user)
     summary = _STATUS_SUMMARY_TEMPLATE.format(status=status)
 
@@ -591,7 +602,8 @@ def run_normalisation_workflow(
     )
 
     # Fun little feature: announce ourselves as busy on our status subpage
-    # as soon as we're logged in and hold a CSRF token.
+    # as soon as we're logged in and hold a CSRF token. Opt-in — see
+    # args.update_status_page / UPDATE_STATUS_PAGE.
     update_status_page(
         session=session,
         wiki_api=wiki_api,
@@ -600,6 +612,7 @@ def run_normalisation_workflow(
         status=_STATUS_BUSY,
         dry_run=args.dry_run,
         edit_tags=args.edit_tags,
+        enabled=args.update_status_page,
     )
 
     try:
@@ -653,6 +666,7 @@ def run_normalisation_workflow(
             status=_STATUS_IDLE,
             dry_run=args.dry_run,
             edit_tags=args.edit_tags,
+            enabled=args.update_status_page,
         )
 
 
@@ -675,6 +689,9 @@ def execute(args: argparse.Namespace) -> int:
         if not args.rehyphenate_equal_label:
             args.rehyphenate_equal_label = _parse_bool_env(
                 "REHYPHENATE_EQUAL_LABEL", default=False)
+        if not args.update_status_page:
+            args.update_status_page = _parse_bool_env(
+                "UPDATE_STATUS_PAGE", default=False)
 
         # String args: non-empty CLI value > env var > built-in default.
         if not args.template_title:
@@ -737,6 +754,16 @@ def build_parser() -> argparse.ArgumentParser:
             "When template param1 and param2 are semantically the same ISBN, "
             "replace the template with {{ISBNT|$1}} and keep parameter 1 "
             "hyphenated. Overrides REHYPHENATE_EQUAL_LABEL in .env."),
+    )
+    parser.add_argument(
+        "--update-status-page",
+        action="store_true",
+        default=False,
+        help=(
+            "Enable the bot status subpage feature: writes 'busy'/'holiday' "
+            "to User:<bot>/Status while running. Opt-in and off by default "
+            "so forks/other deployments aren't affected. "
+            "Overrides UPDATE_STATUS_PAGE in .env."),
     )
     parser.add_argument(
         "--query",

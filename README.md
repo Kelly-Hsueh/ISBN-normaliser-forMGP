@@ -30,6 +30,7 @@
   - 检查 Allowbots 规则后再编辑
   - 支持编辑数量上限控制
   - 根据实际改动类型逐页自动拼接编辑摘要
+  - 可选：将运行状态（busy/holiday）写入 `User:<机器人名>/Status` 子页面（**默认关闭**，见 `UPDATE_STATUS_PAGE`）
 
 ## 依赖资源
 
@@ -254,6 +255,7 @@ REHYPHENATE_EQUAL_LABEL=false
 TO13=false
 SUMMARY=根据 ISO 2108:2017（...）自动调整ISBN（...）
 EDIT_TAGS=Bot
+UPDATE_STATUS_PAGE=false
 ```
 
 | 变量 | 对应 CLI 参数 | 说明 |
@@ -267,6 +269,11 @@ EDIT_TAGS=Bot
 | `TO13` | `-to13` | 将 ISBN-10 转换为 ISBN-13 |
 | `SUMMARY` | `--summary` | ISO 2108 说明文字（附加于每条摘要末尾） |
 | `EDIT_TAGS` | `--edit-tags` | 编辑时附加的变更标签；多个标签以 `\|` 分隔（如 `Bot\|test`），留空则不附加任何标签 |
+| `UPDATE_STATUS_PAGE` | `--update-status-page` | 是否启用机器人状态子页面（写入 `User:<机器人名>/Status`，标记 busy/holiday）；**默认关闭**，需显式开启为 `true` |
+
+> [!NOTE]
+> `UPDATE_STATUS_PAGE` 默认关闭，是因为该功能会往机器人自己的用户子页面写入。fork 时未必需要或未必希望有这个状态页。
+> 本仓库自带的 `.env` 中已显式设为 `true`（这是源头机器人的默认行为），若 fork 本项目，请按需保留或改回 `false`。
 
 如需适配其他 wiki，修改后提交即可。所有字段均可通过对应命令行参数临时覆盖。
 
