@@ -317,6 +317,86 @@ def build_isbn_template_node(
         f"{{{{{template_name}|{code_value}|{label_value}}}}}").nodes[0]
 
 
+def preferred_isbn_template_name(
+        template_preferred_map: dict[str, str] | None) -> str:
+    if not template_preferred_map:
+        return "ISBN"
+    return (template_preferred_map.get("isbn")
+            or next(iter(template_preferred_map.values()), "ISBN"))
+
+
+def get_booksource_display_text(wikilink: Any, target: str) -> str:
+    return (str(wikilink.text).strip()
+            if wikilink.text is not None else target.strip())
+
+
+def build_booksource_template_value(
+    raw_value: str,
+    groups: list[Group],
+    convert_10_to_13: bool,
+) -> tuple[str, bool, bool]:
+    normalised = normalise_if_isbn(raw_value, groups, convert_10_to_13)
+    if normalised is not None:
+        return normalised, True, normalised != raw_value.strip()
+
+    if not is_isbn_shaped(raw_value):
+        return "", False, False
+
+    invalid_isbn = try_hyphenate_invalid_isbn(raw_value, groups)
+    if invalid_isbn is not None:
+        formatted, expected = invalid_isbn
+        return add_invalid_check_digit_note(formatted, expected), True, True
+
+    if has_valid_isbn_check_digit(raw_value):
+        return add_unmapped_isbn_note(raw_value.strip()), True, False
+    return add_invalid_unmapped_isbn_note(raw_value.strip()), True, False
+
+
+def build_booksource_replacement(
+    wikilink: Any,
+    groups: list[Group],
+    convert_10_to_13: bool,
+    template_preferred_map: dict[str, str] | None,
+) -> tuple[str, bool, bool, bool]:
+    raw_value = extract_booksource_isbn_from_title(wikilink.title)
+    if raw_value is None:
+        return "", False, False, False
+
+    template_value, is_isbn, reformatted = build_booksource_template_value(
+        raw_value, groups, convert_10_to_13)
+    if not is_isbn:
+        display_text = get_booksource_display_text(wikilink, raw_value)
+        if not display_text:
+            return "", False, False, False
+        replacement = add_removed_booksource_note(display_text,
+                                                  raw_value.strip())
+        is_gs1 = is_valid_gs1(raw_value)
+        return replacement, True, is_gs1, False
+
+    label_raw = get_booksource_display_text(wikilink, "")
+    label_isbn_raw = split_isbn_prefixed_label(label_raw)
+    output_label = label_raw or None
+    label_value = (normalise_if_isbn(label_isbn_raw, groups, convert_10_to_13)
+                   if label_isbn_raw is not None else None)
+    if label_isbn_raw is not None:
+        reformatted = (reformatted
+                       or (label_value is not None
+                           and label_value != label_isbn_raw.strip()))
+        if are_semantically_equal_isbns(raw_value, label_isbn_raw):
+            output_label = None
+    elif label_raw:
+        label_value = normalise_if_isbn(label_raw, groups, convert_10_to_13)
+        reformatted = (reformatted or (label_value is not None
+                                       and label_value != label_raw.strip()))
+
+    replacement = build_isbn_template_node(
+        template_value,
+        label_value if label_value is not None else output_label,
+        preferred_isbn_template_name(template_preferred_map),
+    )
+    return str(replacement), True, False, reformatted
+
+
 # ---------------------------------------------------------------------------
 # Normalisation sub-routines (each returns ChangeReport)
 # ---------------------------------------------------------------------------
@@ -366,107 +446,92 @@ def replace_booksource_links_with_isbn_templates(
     template_preferred_map: dict[str, str] | None = None,
 ) -> ChangeReport:
     report = ChangeReport()
-    wikilinks = list(code.filter_wikilinks())
-
-    for wikilink in wikilinks:
-        link_isbn_raw = extract_booksource_isbn_from_title(wikilink.title)
-        if link_isbn_raw is None:
-            continue
-
-        normalised_link_isbn = normalise_if_isbn(link_isbn_raw, groups,
-                                                 convert_10_to_13)
-        link_digits = canonical_gs1(link_isbn_raw)
-        isbn_shaped = is_isbn_shaped(link_isbn_raw)
-        invalid_isbn = (try_hyphenate_invalid_isbn(link_isbn_raw, groups) if
-                        normalised_link_isbn is None and isbn_shaped else None)
-
-        if normalised_link_isbn is None and not isbn_shaped:
-            display_text = (str(wikilink.text).strip() if wikilink.text
-                            is not None else link_isbn_raw.strip())
-            if not display_text:
-                continue
-            code.replace(
+    for wikilink in list(code.filter_wikilinks()):
+        replacement, removed, is_gs1, reformatted = (
+            build_booksource_replacement(
                 wikilink,
-                add_removed_booksource_note(display_text,
-                                            link_isbn_raw.strip()))
-            report.booksource_links_removed += 1
-            if link_digits is not None and is_valid_gs1(link_isbn_raw):
-                report.gs1_links_plaintext += 1
+                groups,
+                convert_10_to_13,
+                template_preferred_map,
+            ))
+        if not replacement:
             continue
-
-        label_raw = (str(wikilink.text).strip()
-                     if wikilink.text is not None else "")
-
-        # Track whether an ISBN *value* actually changes shape here, as
-        # opposed to this being a pure link→template swap of an
-        # already-correctly-formatted code (see ChangeReport.isbn_reformatted).
-        value_reformatted = (normalised_link_isbn is not None
-                             and normalised_link_isbn != link_isbn_raw.strip())
-        if invalid_isbn is not None:
-            invalid_formatted, expected_check_digit = invalid_isbn
-            link_template_value = add_invalid_check_digit_note(
-                invalid_formatted, expected_check_digit)
-            value_reformatted = True
-        elif normalised_link_isbn is None and isbn_shaped:
-            if has_valid_isbn_check_digit(link_isbn_raw):
-                link_template_value = add_unmapped_isbn_note(
-                    link_isbn_raw.strip())
-            else:
-                link_template_value = add_invalid_unmapped_isbn_note(
-                    link_isbn_raw.strip())
-        else:
-            link_template_value = normalised_link_isbn or link_isbn_raw.strip()
-
-        label_isbn_raw = split_isbn_prefixed_label(label_raw)
-
-        preferred_template = "ISBN"
-        if template_preferred_map:
-            if pt := template_preferred_map.get("isbn"):
-                preferred_template = pt
-            elif vals := list(template_preferred_map.values()):
-                preferred_template = vals[0]
-
-        if label_isbn_raw is not None:
-            label_isbn_normalised = normalise_if_isbn(label_isbn_raw, groups,
-                                                      convert_10_to_13)
-            if label_isbn_normalised is not None:
-                value_reformatted = (value_reformatted or label_isbn_normalised
-                                     != label_isbn_raw.strip())
-            if are_semantically_equal_isbns(link_isbn_raw, label_isbn_raw):
-                replacement = build_isbn_template_node(link_template_value,
-                                                       None,
-                                                       preferred_template)
-            else:
-                replacement = build_isbn_template_node(
-                    link_template_value,
-                    label_isbn_normalised
-                    if label_isbn_normalised is not None else label_raw,
-                    preferred_template,
-                )
-        elif label_raw:
-            label_isbn_normalised = normalise_if_isbn(label_raw, groups,
-                                                      convert_10_to_13)
-            if label_isbn_normalised is not None:
-                value_reformatted = (value_reformatted or label_isbn_normalised
-                                     != label_raw.strip())
-            replacement = build_isbn_template_node(
-                link_template_value,
-                label_isbn_normalised
-                if label_isbn_normalised is not None else label_raw,
-                preferred_template,
-            )
-        else:
-            replacement = build_isbn_template_node(
-                link_template_value,
-                None,
-                preferred_template,
-            )
-
         code.replace(wikilink, replacement)
-        report.booksource_links += 1
-        if value_reformatted:
-            report.isbn_reformatted += 1
+        if removed:
+            report.booksource_links_removed += 1
+            report.gs1_links_plaintext += int(is_gs1)
+        else:
+            report.booksource_links += 1
+            report.isbn_reformatted += int(reformatted)
 
+    return report
+
+
+def normalise_existing_isbn_template(
+    template: Any,
+    groups: list[Group],
+    convert_10_to_13: bool,
+    rehyphenate_equal_label: bool,
+    template_preferred_map: dict[str, str] | None,
+) -> ChangeReport:
+    report = ChangeReport()
+    if not template.has("1"):
+        return report
+
+    param1 = template.get("1")
+    code_str = str(param1.value).strip()
+    normalised_1 = try_normalise_template_value(code_str, groups,
+                                                convert_10_to_13)
+    if normalised_1 is None:
+        return report
+
+    output_label = get_template_label_value(template, groups, convert_10_to_13)
+    equal_isbn = are_semantically_equal_isbns(code_str, output_label)
+    if rehyphenate_equal_label and equal_isbn:
+        if preferred_isbnt := (template_preferred_map or {}).get("isbnt"):
+            template.name = preferred_isbnt
+        if normalised_1 != code_str:
+            report.isbn_reformatted += 1
+        param1.value = normalised_1
+        if template.has("2"):
+            template.remove("2")
+        report.isbnt_merged += 1
+        return report
+
+    original_label = (str(template.get("2").value).strip()
+                      if template.has("2") else None)
+    if normalised_1 == code_str and output_label == original_label:
+        return report
+
+    param1.value = normalised_1
+    update_template_label(template, output_label)
+    if convert_10_to_13 and _is_isbn10_input(code_str):
+        report.isbn10_converted += 1
+    else:
+        report.isbn_normalised += 1
+    return report
+
+
+def normalise_existing_isbn_templates(
+    code: Any,
+    groups: list[Group],
+    convert_10_to_13: bool,
+    rehyphenate_equal_label: bool,
+    template_name_aliases: frozenset[str],
+    template_preferred_map: dict[str, str] | None,
+) -> ChangeReport:
+    report = ChangeReport()
+    templates = code.filter_templates(
+        matches=lambda template: canonicalise_title_fragment(str(
+            template.name)) in template_name_aliases)
+    for template in list(templates):
+        report += normalise_existing_isbn_template(
+            template,
+            groups,
+            convert_10_to_13,
+            rehyphenate_equal_label,
+            template_preferred_map,
+        )
     return report
 
 
@@ -499,56 +564,14 @@ def normalise_isbn_templates(
         convert_10_to_13,
         template_preferred_map,
     )
-
-    templates_found = list(
-        code.filter_templates(matches=lambda t: canonicalise_title_fragment(
-            str(t.name)) in template_name_aliases))
-
-    for template in templates_found:
-        if not template.has("1"):
-            continue
-
-        param1 = template.get("1")
-        code_str = str(param1.value).strip()
-
-        normalised_1 = try_normalise_template_value(code_str, groups,
-                                                    convert_10_to_13)
-        if normalised_1 is None:
-            continue
-
-        output_label = get_template_label_value(template, groups,
-                                                convert_10_to_13)
-        equal_isbn = are_semantically_equal_isbns(code_str, output_label)
-
-        if rehyphenate_equal_label and equal_isbn:
-            if template_preferred_map:
-                preferred_isbnt = template_preferred_map.get("isbnt")
-            else:
-                preferred_isbnt = None
-            if preferred_isbnt:
-                template.name = preferred_isbnt
-            if normalised_1 != code_str:
-                report.isbn_reformatted += 1
-            template.get("1").value = normalised_1
-            if template.has("2"):
-                template.remove("2")
-            report.isbnt_merged += 1
-            continue
-
-        original_code = code_str
-        original_label = (str(template.get("2").value).strip()
-                          if template.has("2") else None)
-
-        if normalised_1 == original_code and output_label == original_label:
-            continue
-
-        template.get("1").value = normalised_1
-        update_template_label(template, output_label)
-
-        if convert_10_to_13 and _is_isbn10_input(original_code):
-            report.isbn10_converted += 1
-        else:
-            report.isbn_normalised += 1
+    report += normalise_existing_isbn_templates(
+        code,
+        groups,
+        convert_10_to_13,
+        rehyphenate_equal_label,
+        template_name_aliases,
+        template_preferred_map,
+    )
 
     return str(code), report
 
