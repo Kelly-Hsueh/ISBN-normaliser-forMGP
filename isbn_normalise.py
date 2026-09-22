@@ -14,6 +14,9 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 
+GS1_LENGTHS = frozenset({8, 12, 13, 14, 17, 18})
+# GS1 General Specifications Release 26.0, 7.9.1
+
 
 @dataclass(frozen=True)
 class Rule:
@@ -33,23 +36,42 @@ def only_digits(text: str) -> str:
     return re.sub(r"\D", "", text)
 
 
+def canonical_gs1(text: str) -> str | None:
+    """Return digits from a GS1 code written with optional separators."""
+    stripped = text.strip()
+    if not stripped or re.fullmatch(r"[0-9][0-9 -]*", stripped) is None:
+        return None
+    digits = only_digits(stripped)
+    return digits if len(digits) in GS1_LENGTHS else None
+
+
+def compute_gs1_check_digit(first_digits: str) -> int:
+    total = sum(
+        int(digit) * (3 if index % 2 == 0 else 1)
+        for index, digit in enumerate(reversed(first_digits)))
+    return (10 - total % 10) % 10
+
+
+def is_valid_gs1(text: str) -> bool:
+    digits = canonical_gs1(text)
+    return (digits is not None
+            and compute_gs1_check_digit(digits[:-1]) == int(digits[-1]))
+
+
 def canonical_isbn10(text: str) -> str:
     # ISBN-10 may end with X/x check digit.
     return re.sub(r"[^0-9Xx]", "", text).upper()
 
 
 def compute_isbn13_check_digit(first12: str) -> int:
-    total = 0
-    for idx, ch in enumerate(first12):
-        digit = int(ch)
-        total += digit if idx % 2 == 0 else digit * 3
-    return (10 - (total % 10)) % 10
+    return compute_gs1_check_digit(first12)
 
 
 def is_valid_isbn13(digits13: str) -> bool:
-    if len(digits13) != 13 or not digits13.isdigit():
+    if (len(digits13) != 13 or not digits13.isdigit()
+            or not digits13.startswith(("978", "979"))):
         return False
-    return compute_isbn13_check_digit(digits13[:12]) == int(digits13[12])
+    return is_valid_gs1(digits13)
 
 
 def compute_isbn10_check_digit(first9: str) -> str:
@@ -149,14 +171,15 @@ def to_7_digit_interval(reg_pub: str) -> tuple[int, int] | None:
 
 def hyphenate_isbn13(digits13: str,
                      groups: list[Group],
-                     with_label: bool = True) -> str:
+                     with_label: bool = True,
+                     validate_check_digit: bool = True) -> str:
     if not digits13.isdigit() or len(digits13) != 13:
         raise ValueError("ISBN must contain exactly 13 digits.")
 
     if not digits13.startswith(("978", "979")):
         raise ValueError("ISBN-13 must start with 978 or 979.")
 
-    if not is_valid_isbn13(digits13):
+    if validate_check_digit and not is_valid_isbn13(digits13):
         raise ValueError("Invalid ISBN-13 check digit.")
 
     check_digit = digits13[-1]
@@ -192,8 +215,9 @@ def hyphenate_isbn13(digits13: str,
 
 def hyphenate_isbn10(code10: str,
                      groups: list[Group],
-                     with_label: bool = True) -> str:
-    if not is_valid_isbn10(code10):
+                     with_label: bool = True,
+                     validate_check_digit: bool = True) -> str:
+    if validate_check_digit and not is_valid_isbn10(code10):
         raise ValueError("Invalid ISBN-10 check digit.")
 
     digits13 = isbn10_to_isbn13_digits(code10)

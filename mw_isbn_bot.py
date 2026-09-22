@@ -392,6 +392,12 @@ def compose_summary(report: ChangeReport, iso_summary: str) -> str:
     if report.booksource_links:
         parts.append(
             "替换&lsqb;&lsqb;Special:网络书源/&rsqb;&rsqb;为{{[[T:ISBN|ISBN]]}}")
+    if report.gs1_links_plaintext:
+        parts.append(
+            "将非 ISBN 或 EAN-13 ，但校验通过且需要校验位的固定长度数值型 GS1 数据结构修改为纯文本。如确有需要请联系机器人维护者"
+        )
+    elif report.booksource_links_removed:
+        parts.append("移除无法识别为 ISBN 或 EAN-13 的网络书源链接")
     if report.isbn10_converted:
         parts.append("将 ISBN-10 转换为 ISBN-13")
     if report.isbnt_merged:
@@ -690,8 +696,8 @@ def execute(args: argparse.Namespace) -> int:
             args.rehyphenate_equal_label = _parse_bool_env(
                 "REHYPHENATE_EQUAL_LABEL", default=False)
         if not args.update_status_page:
-            args.update_status_page = _parse_bool_env(
-                "UPDATE_STATUS_PAGE", default=False)
+            args.update_status_page = _parse_bool_env("UPDATE_STATUS_PAGE",
+                                                      default=False)
 
         # String args: non-empty CLI value > env var > built-in default.
         if not args.template_title:
@@ -759,11 +765,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--update-status-page",
         action="store_true",
         default=False,
-        help=(
-            "Enable the bot status subpage feature: writes 'busy'/'holiday' "
-            "to User:<bot>/Status while running. Opt-in and off by default "
-            "so forks/other deployments aren't affected. "
-            "Overrides UPDATE_STATUS_PAGE in .env."),
+        help=("Enable the bot status subpage feature: writes 'busy'/'holiday' "
+              "to User:<bot>/Status while running. Opt-in and off by default "
+              "so forks/other deployments aren't affected. "
+              "Overrides UPDATE_STATUS_PAGE in .env."),
     )
     parser.add_argument(
         "--query",
