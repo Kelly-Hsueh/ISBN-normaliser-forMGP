@@ -42,7 +42,7 @@ DEFAULT_USER_AGENT = (
     "(https://github.com/kelly/ISBN-normaliser; 75931686+Kelly-Hsueh@users.noreply.github.com) "
     "requests/2.33.x")
 DEFAULT_WIKI_API = "https://mzh.moegirl.org.cn/api.php"
-_FALLBACK_TEMPLATE_TITLE = "Template:ISBN|Template:ISBNT|Template:Cite book"
+_FALLBACK_TEMPLATE_TITLE = "Template:ISBN|Template:Cite book"
 _FALLBACK_XML_PATH = "RangeMessage.xml"
 _FALLBACK_EDIT_TAGS = "Bot"
 _DEFAULT_SUMMARY = (
@@ -176,6 +176,20 @@ def get_skip_reason(content: str, assert_user: str) -> str | None:
     if not allowbots(content, assert_user):
         return "bots"
     return "inuse" if is_underconstruction(content) else None
+
+
+def is_configured_template_page(
+    page: dict[str, Any],
+    template_titles: str | None,
+) -> bool:
+    if page.get("ns") != 10 or not template_titles:
+        return False
+    configured_names = {
+        canonicalise_title_fragment(title.rsplit(":", 1)[-1])
+        for title in template_titles.split("|") if title.strip()
+    }
+    page_name = page.get("title", "").rsplit(":", 1)[-1]
+    return canonicalise_title_fragment(page_name) in configured_names
 
 
 # ---------------------------------------------------------------------------
@@ -492,6 +506,10 @@ def process_pages(
     for pageid in pageids:
         page = pages_by_id.get(pageid)
         if page is None:
+            continue
+        if is_configured_template_page(page, args.template_title):
+            print(f"\033[93m[SKIP][template] pageid={pageid} "
+                  f"title={page.get('title', '')}\033[0m")
             continue
 
         title = page.get("title", "")

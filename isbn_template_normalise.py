@@ -305,6 +305,12 @@ def add_removed_booksource_note(display_text: str, target: str) -> str:
     return f"{display_text}<!-- 此处原使用[[Special:网络书源]]，链接目标：{target} -->"
 
 
+def is_valid_ean13(raw_value: str) -> bool:
+    digits = canonical_gs1(raw_value)
+    return (digits is not None and len(digits) == 13
+            and is_valid_gs1(raw_value))
+
+
 def build_isbn_template_node(
     code_value: str,
     label_value: str | None,
@@ -328,6 +334,18 @@ def preferred_isbn_template_name(
 def get_booksource_display_text(wikilink: Any, target: str) -> str:
     return (str(wikilink.text).strip()
             if wikilink.text is not None else target.strip())
+
+
+def build_non_isbn_booksource_replacement(
+    wikilink: Any,
+    raw_value: str,
+) -> tuple[str, str | None]:
+    display_text = get_booksource_display_text(wikilink, raw_value)
+    if not display_text or is_valid_ean13(raw_value):
+        return "", None
+    category = "gs1" if is_valid_gs1(raw_value) else None
+    return (add_removed_booksource_note(display_text,
+                                        raw_value.strip()), category)
 
 
 def build_booksource_template_value(
@@ -357,21 +375,19 @@ def build_booksource_replacement(
     groups: list[Group],
     convert_10_to_13: bool,
     template_preferred_map: dict[str, str] | None,
-) -> tuple[str, bool, bool, bool]:
+) -> tuple[str, bool, str | None, bool]:
     raw_value = extract_booksource_isbn_from_title(wikilink.title)
     if raw_value is None:
-        return "", False, False, False
+        return "", False, None, False
 
     template_value, is_isbn, reformatted = build_booksource_template_value(
         raw_value, groups, convert_10_to_13)
     if not is_isbn:
-        display_text = get_booksource_display_text(wikilink, raw_value)
-        if not display_text:
-            return "", False, False, False
-        replacement = add_removed_booksource_note(display_text,
-                                                  raw_value.strip())
-        is_gs1 = is_valid_gs1(raw_value)
-        return replacement, True, is_gs1, False
+        replacement, category = build_non_isbn_booksource_replacement(
+            wikilink, raw_value)
+        if not replacement:
+            return "", False, None, False
+        return replacement, True, category, False
 
     label_raw = get_booksource_display_text(wikilink, "")
     label_isbn_raw = split_isbn_prefixed_label(label_raw)
@@ -394,7 +410,7 @@ def build_booksource_replacement(
         label_value if label_value is not None else output_label,
         preferred_isbn_template_name(template_preferred_map),
     )
-    return str(replacement), True, False, reformatted
+    return str(replacement), True, None, reformatted
 
 
 # ---------------------------------------------------------------------------
@@ -447,7 +463,7 @@ def replace_booksource_links_with_isbn_templates(
 ) -> ChangeReport:
     report = ChangeReport()
     for wikilink in list(code.filter_wikilinks()):
-        replacement, removed, is_gs1, reformatted = (
+        replacement, removed, gs1_category, reformatted = (
             build_booksource_replacement(
                 wikilink,
                 groups,
@@ -459,7 +475,7 @@ def replace_booksource_links_with_isbn_templates(
         code.replace(wikilink, replacement)
         if removed:
             report.booksource_links_removed += 1
-            report.gs1_links_plaintext += int(is_gs1)
+            report.gs1_links_plaintext += int(gs1_category == "gs1")
         else:
             report.booksource_links += 1
             report.isbn_reformatted += int(reformatted)
