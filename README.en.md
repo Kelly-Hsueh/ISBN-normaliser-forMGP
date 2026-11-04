@@ -4,7 +4,7 @@
 
 # ISBN Normaliser
 
-A standalone normalisation tool and MediaWiki bot for the {{[ISBN](https://mzh.moegirl.org.cn/Template:ISBN)}} template in MoegirlPedia wikitext. The normaliser script can also run independently.
+A standalone normalisation tool and MediaWiki bot for the {{[ISBN](https://mzh.moegirl.org.cn/Template:ISBN)}} template in MoegirlPedia wikitext. The normaliser can also run independently.
 
 ## Core Features
 
@@ -25,7 +25,7 @@ A standalone normalisation tool and MediaWiki bot for the {{[ISBN](https://mzh.m
   - Supports multiple page fetch strategies (selected via `--query` / `-q`)
   - `transcludedin`: fetch pages transcluding Template:ISBN and their revisions via `generator=transcludedin`
   - `booksource-search`: find pages containing `Special:BookSources/` links via `insource:` full-text search
-  - Automatic pagination via API continue and revision version continuation (rvcontinue)
+  - Automatic pagination via API `continue` and revision continuation (`rvcontinue`)
   - Detect and log API size limit warnings while continuing to fetch remaining data
   - Allowbots compliance check before editing
   - Configurable edit count limit per run
@@ -39,7 +39,7 @@ A standalone normalisation tool and MediaWiki bot for the {{[ISBN](https://mzh.m
 ## Environment And Packages
 
 - Python 3.10+ (3.11 recommended, consistent with GitHub Actions)
-- Third-party packages (not required if only processing one single ISBN, not wikitext):
+- Third-party packages (not required when processing a single ISBN rather than wikitext):
   - `requests`
   - `brotli`
   - `mwparserfromhell`
@@ -82,7 +82,7 @@ python isbn_template_normalise.py \
   --in-place
 ```
 
-**Format + convert to ISBN-13:**
+**Format and convert to ISBN-13:**
 ```bash
 python isbn_template_normalise.py \
   --xml RangeMessage.xml \
@@ -91,7 +91,7 @@ python isbn_template_normalise.py \
   --in-place
 ```
 
-**Format + convert semantically equal params to ISBNT:**
+**Format and convert semantically equal parameters to ISBNT:**
 ```bash
 python isbn_template_normalise.py \
   --xml RangeMessage.xml \
@@ -144,7 +144,7 @@ File: `.github/workflows/isbn-normaliser-bot.yml`
 1. **Manual trigger (workflow_dispatch)**
   - `query` — Fetch strategy (leave empty to use `DEFAULT_QUERY` from `.env`)
   - `dry_run` — Whether to run without saving edits
-  - `max_edits` — Edit count limit for this run (leave empty for unlimited)
+  - `max_edits` — Maximum number of pages to edit in this run (leave empty for unlimited)
   - Open the Actions tab and click "Run workflow"
 
 2. **Scheduled execution**
@@ -234,7 +234,7 @@ File: `.github/workflows/update-booksource-aliases.yml`
 
 ## Environment Configuration
 
-The project uses a two-file configuration scheme to separate public settings from private credentials:
+The project uses two configuration files to separate public settings from private credentials:
 
 | File | Version-controlled | Purpose |
 |------|--------------------|---------|
@@ -272,8 +272,8 @@ UPDATE_STATUS_PAGE=false
 | `UPDATE_STATUS_PAGE` | `--update-status-page` | Enable the bot status subpage feature (writes busy/holiday to `User:<bot>/Status`); **off by default**, must be explicitly set to `true` |
 
 > [!NOTE]
-> `UPDATE_STATUS_PAGE` defaults to off because this feature writes a subpage under the bot's own userpage — something a fork running under a different bot account may not want. 
-> This repository's shipped `.env` sets it to `true` (the upstream bot's own default); if you fork this project, keep or reset it as appropriate for your deployment.
+> `UPDATE_STATUS_PAGE` defaults to `false`. When enabled, the bot writes its status to a subpage under its own user page; a fork may not need this status page.
+> This repository's shipped `.env` sets it to `true`, which is the upstream bot's configuration. If you fork this project, keep or reset it according to your deployment needs.
 
 To adapt to a different wiki, edit this file and commit the change. All fields can be overridden temporarily via the corresponding CLI flag.
 
@@ -298,7 +298,7 @@ CLI flag > system env var (including GHA env: injection) > .env.pwd > .env > bui
 
 ## Normalisation Rules
 
-- Always normalise template parameter 1 (when valid)
+- Always normalise template parameter 1 when it is valid
 - Keep parameter 2 unchanged by default
 - Only when explicitly enabled and semantically identical: rewrite the template as `{{ISBNT|$1}}` and keep parameter 1 hyphenated
 - Edit summaries are composed automatically per page based on the actual types of changes made, with components joined by fullwidth semicolons (`；`):
