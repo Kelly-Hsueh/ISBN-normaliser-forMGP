@@ -17,8 +17,8 @@
 ]>
 <ISBNRangeMessage>
   <MessageSource>International ISBN Agency</MessageSource>
-  <MessageSerialNumber>0d980e8b-6217-42b5-97b9-616addefb60c</MessageSerialNumber>
-  <MessageDate>Wed, 28 Oct 2026 09:24:34 UTC</MessageDate>
+  <MessageSerialNumber>aa15afe7-91f7-4fe7-8f7f-e5a44a854aa5</MessageSerialNumber>
+  <MessageDate>Wed, 4 Nov 2026 16:31:42 UTC</MessageDate>
   <EAN.UCCPrefixes>
     <EAN.UCC>
       <Prefix>978</Prefix>
@@ -229,8 +229,12 @@
           <Length>2</Length>
         </Rule>
         <Rule>
-          <Range>0600000-0643749</Range>
+          <Range>0600000-0643249</Range>
           <Length>0</Length>
+        </Rule>
+        <Rule>
+          <Range>0643250-0643749</Range>
+          <Length>7</Length>
         </Rule>
         <Rule>
           <Range>0643750-0653749</Range>
@@ -1885,11 +1889,11 @@
           <Length>6</Length>
         </Rule>
         <Rule>
-          <Range>9024500-9754999</Range>
+          <Range>9024500-9699999</Range>
           <Length>0</Length>
         </Rule>
         <Rule>
-          <Range>9755000-9999999</Range>
+          <Range>9700000-9999999</Range>
           <Length>6</Length>
         </Rule>
       </Rules>
@@ -1929,11 +1933,11 @@
           <Length>0</Length>
         </Rule>
         <Rule>
-          <Range>5000000-5299999</Range>
+          <Range>5000000-5399999</Range>
           <Length>2</Length>
         </Rule>
         <Rule>
-          <Range>5300000-9799999</Range>
+          <Range>5400000-9799999</Range>
           <Length>0</Length>
         </Rule>
         <Rule>
@@ -5301,11 +5305,11 @@
       <Agency>Cambodia</Agency>
       <Rules>
         <Rule>
-          <Range>0000000-2799999</Range>
+          <Range>0000000-2599999</Range>
           <Length>0</Length>
         </Rule>
         <Rule>
-          <Range>2800000-3999999</Range>
+          <Range>2600000-3999999</Range>
           <Length>2</Length>
         </Rule>
         <Rule>
@@ -5313,15 +5317,15 @@
           <Length>0</Length>
         </Rule>
         <Rule>
-          <Range>5000000-6599999</Range>
+          <Range>5000000-6699999</Range>
           <Length>3</Length>
         </Rule>
         <Rule>
-          <Range>6600000-8949999</Range>
+          <Range>6700000-8899999</Range>
           <Length>0</Length>
         </Rule>
         <Rule>
-          <Range>8950000-9999999</Range>
+          <Range>8900000-9999999</Range>
           <Length>4</Length>
         </Rule>
       </Rules>
