@@ -33,6 +33,24 @@ _TRANSIENT_ERRORS = (
 )
 
 # ---------------------------------------------------------------------------
+# Errors
+# ---------------------------------------------------------------------------
+
+
+class MediaWikiEditError(RuntimeError):
+    """Raised when action=edit returns a MediaWiki error.
+
+    Carries the API error *code* (for example ``protectedpage``) so that a
+    caller can tell a permanent, page-level edit restriction apart from a
+    real failure of the run.
+    """
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+# ---------------------------------------------------------------------------
 # Environment loading
 # ---------------------------------------------------------------------------
 
@@ -530,12 +548,13 @@ def edit_page_text(
         error_context=f"Failed to edit pageid={pageid}",
     )
     if "error" in result:
-        error_code = result.get("error", {}).get("code", "")
+        error = result.get("error", {})
+        error_code = error.get("code", "")
         if error_code == "editconflict":
-            raise RuntimeError(
-                f"[editconflict] pageid={pageid}: {result['error']}")
-        raise RuntimeError(
-            f"API edit error for pageid={pageid}: {result['error']}")
+            raise MediaWikiEditError(
+                error_code, f"[editconflict] pageid={pageid}: {error}")
+        raise MediaWikiEditError(
+            error_code, f"API edit error for pageid={pageid}: {error}")
     return result
 
 
@@ -581,8 +600,10 @@ def edit_page_by_title(
         error_context=f"Failed to edit title={title!r}",
     )
     if "error" in result:
-        raise RuntimeError(
-            f"API edit error for title={title!r}: {result['error']}")
+        error = result.get("error", {})
+        raise MediaWikiEditError(
+            error.get("code", ""),
+            f"API edit error for title={title!r}: {error}")
     return result
 
 
