@@ -14,6 +14,7 @@ import requests
 from mw_bot_core import (
     _MAXLAG,
     _TIMEOUT,
+    MediaWikiEditError,
     _parse_bool_env,
     allowbots,
     api_post_json,
@@ -53,6 +54,17 @@ _DEFAULT_SUMMARY = (
 # ISBN-bot specific operational constants.
 _EDIT_INTERVAL: float = 0.2
 _USE_BOT_FLAG: bool = True
+
+# MediaWiki edit error codes that mean "this page cannot be edited by this
+# account" - a permanent property of the page (for example a protected
+# page), not a failure of the run. Such pages are skipped, like edit
+# conflicts, so a run that only meets them still succeeds. Each code maps to
+# the label shown in the skip line.
+_SKIP_EDIT_LABELS: dict[str, str] = {
+    "editconflict": "conflict",
+    "protectedpage": "protected",
+    "cascadeprotected": "protected",
+}
 
 # Status-page constants (fun little feature): the bot advertises its own
 # run state on a subpage of its own userpage. Special:MyPage is a client-side
@@ -470,14 +482,20 @@ def _try_apply_changes(
         )
         time.sleep(_EDIT_INTERVAL)
         return True, False
-    except RuntimeError as exc:
-        if "editconflict" not in str(exc):
+    except MediaWikiEditError as exc:
+        label = _SKIP_EDIT_LABELS.get(exc.code)
+        if label is None:
             print(
                 f"\033[91m[FAILED] pageid={pageid} title={title} error={exc}\033[0m",
                 file=sys.stderr)
             return False, True
-        print(f"\033[93m[SKIP][conflict] pageid={pageid} title={title}\033[0m")
+        print(f"\033[93m[SKIP][{label}] pageid={pageid} title={title}\033[0m")
         return False, False
+    except RuntimeError as exc:
+        print(
+            f"\033[91m[FAILED] pageid={pageid} title={title} error={exc}\033[0m",
+            file=sys.stderr)
+        return False, True
     except Exception as exc:
         print(
             f"\033[91m[FAILED] pageid={pageid} title={title} error={exc}\033[0m",
