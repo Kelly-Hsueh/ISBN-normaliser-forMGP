@@ -4,7 +4,7 @@
 
 # ISBN 规范化工具
 
-这是一个用于处理萌娘百科维基文本中 {{[ISBN](https://mzh.moegirl.org.cn/Template:ISBN)}} 模板的 ISBN 规范化工具，同时提供 MediaWiki 机器人。ISBN 规范化脚本可以单独使用。
+这是一个用于处理萌娘百科 wikitext 中 {{[ISBN](https://mzh.moegirl.org.cn/Template:ISBN)}} 模板的 ISBN 规范化工具，同时提供 MediaWiki 机器人。ISBN 规范化脚本可以单独使用。
 
 ## 核心功能
 
@@ -12,7 +12,7 @@
   - 按国际标准书号规则对 ISBN-10/13 进行连字符规范化
   - 可选：将 ISBN-10 转换为 ISBN-13
 
-- **isbn_template_normalise.py** — 维基文本模板处理工具
+- **isbn_template_normalise.py** — wikitext 模板处理工具
   - 批量处理 `{{ISBN}}` 模板参数
   - 可选：将 ISBN-10 转换为 ISBN-13
   - 可选：当参数 1 和参数 2 的语义相同时，将模板替换为 `{{ISBNT|$1}}`，其中 `$1` 为带连字符的 ISBN
@@ -39,7 +39,7 @@
 ## 环境与依赖
 
 - Python 3.10+（推荐 3.11，与 GitHub Actions 一致）
-- 第三方依赖（仅处理单个 ISBN 而不处理维基文本时不需要）：
+- 第三方依赖（仅处理单个 ISBN 而不处理 wikitext 时不需要）：
   - `requests`
   - `brotli`
   - `mwparserfromhell`
@@ -198,7 +198,7 @@ python mw_isbn_bot.py \
   - 仅处理单个 ISBN 输入输出
 
 - `isbn_template_normalise.py`：
-  - 维基文本中 `{{ISBN}}` 模板的批量处理逻辑
+  - wikitext 中 `{{ISBN}}` 模板的批量处理逻辑
   - `ChangeReport` 数据类记录四类改动：BookSources 链接替换、连字符规范化、ISBN-10 转换和 ISBNT 合并
   - 供 `mw_isbn_bot.py` 和命令行模板处理功能复用
 
