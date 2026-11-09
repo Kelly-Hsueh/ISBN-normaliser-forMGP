@@ -15,7 +15,9 @@ jobs:
 
       - name: Download RangeMessage.xml
         run: |
-          curl -o RangeMessage.xml https://www.isbn-international.org/export_rangemessage.xml
+          curl --fail --location --output RangeMessage.xml.tmp https://www.isbn-international.org/export_rangemessage.xml
+          python3 -c "import xml.etree.ElementTree as ET; ET.parse('RangeMessage.xml.tmp')"
+          mv RangeMessage.xml.tmp RangeMessage.xml
 
       - name: Commit and push changes
         run: |
