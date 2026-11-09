@@ -15,9 +15,37 @@ jobs:
 
       - name: Download RangeMessage.xml
         run: |
-          curl --fail --location --output RangeMessage.xml.tmp https://www.isbn-international.org/export_rangemessage.xml
-          python3 -c "import xml.etree.ElementTree as ET; ET.parse('RangeMessage.xml.tmp')"
-          mv RangeMessage.xml.tmp RangeMessage.xml
+          set -euo pipefail
+          url="https://www.isbn-international.org/export_rangemessage.xml"
+          tmp="RangeMessage.xml.tmp"
+          rm -f "$tmp"
+          response=$(curl --silent --show-error --location --proto-redir =https \
+            --write-out '%{http_code} %{url_effective}' --output "$tmp" "$url")
+          status=${response%% *}
+          final_url=${response#* }
+          case "$final_url" in
+            "https://isbn-international.org/"*|"https://www.isbn-international.org/"*) ;;
+            *)
+              echo "Refusing download from untrusted redirect target: $final_url" >&2
+              exit 1
+              ;;
+          esac
+          if [ "$status" != "200" ]; then
+            echo "Download returned HTTP $status, expected 200" >&2
+            exit 1
+          fi
+          python3 - "$tmp" <<'PY'
+          import sys
+          from pathlib import Path
+
+          from isbn_normalise import load_groups
+
+          groups = load_groups(Path(sys.argv[1]))
+          if not groups:
+              raise SystemExit("RangeMessage.xml holds no usable ISBN registration groups")
+          print(f"Validated {len(groups)} registration groups")
+          PY
+          mv "$tmp" RangeMessage.xml
 
       - name: Commit and push changes
         run: |
