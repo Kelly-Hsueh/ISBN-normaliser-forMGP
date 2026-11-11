@@ -49,26 +49,33 @@ def main():
     # Always keep the software-defined realname as a canonical fallback.
     aliases = {canonicalise(BOOKSOURCE_REALNAME)}
     realname_lower = BOOKSOURCE_REALNAME.casefold()
+    found_booksources = False
     for entry in data.get("query", {}).get("specialpagealiases", []) or []:
         if not isinstance(entry, dict):
             continue
         if entry.get("realname", "").casefold() != realname_lower:
             continue
+        found_booksources = True
         for alias in entry.get("aliases", []) or []:
             if isinstance(alias, str) and alias:
                 if canon := canonicalise(alias):
                     aliases.add(canon)
         break
 
+    if not found_booksources:
+        raise SystemExit(
+            "API response has no Booksources special-page entry; "
+            "refusing to overwrite the committed aliases")
+
     sorted_aliases = sorted(aliases)
     aliases_repr = "frozenset({" + ", ".join(
-        f'"{alias}"' for alias in sorted_aliases) + "})"
+        repr(alias) for alias in sorted_aliases) + "})"
 
     path = Path("isbn_template_normalise.py")
     text = path.read_text(encoding="utf-8")
     new_text = re.sub(
         r"BOOKSOURCE_PAGE_ALIASES\s*=\s*frozenset\(\s*\{[^}]*\}\s*\)",
-        f"BOOKSOURCE_PAGE_ALIASES = {aliases_repr}",
+        lambda _match: f"BOOKSOURCE_PAGE_ALIASES = {aliases_repr}",
         text,
     )
 
