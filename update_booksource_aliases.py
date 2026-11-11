@@ -67,7 +67,7 @@ def main():
     path = Path("isbn_template_normalise.py")
     text = path.read_text(encoding="utf-8")
     new_text = re.sub(
-        r"BOOKSOURCE_PAGE_ALIASES\s*=\s*frozenset\(\{[^}]*\}\)",
+        r"BOOKSOURCE_PAGE_ALIASES\s*=\s*frozenset\(\s*\{[^}]*\}\s*\)",
         f"BOOKSOURCE_PAGE_ALIASES = {aliases_repr}",
         text,
     )
