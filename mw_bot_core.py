@@ -306,26 +306,58 @@ def get_csrf_token(
 # ---------------------------------------------------------------------------
 
 
+_WIKITEXT_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+_BOT_TEMPLATE = re.compile(
+    r"\{\{\s*(nobots|bots)\s*(?:\|(.*?))?\}\}",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _parse_bot_params(body: str | None) -> dict[str, str]:
+    """Split a {{bots}} template body into its named parameters."""
+    params: dict[str, str] = {}
+    if not body:
+        return params
+    for part in body.split("|"):
+        key, sep, value = part.partition("=")
+        params[key.strip().lower()] = value.strip() if sep else ""
+    return params
+
+
+def _bot_list_allows(value: str, user: str) -> bool:
+    """True when *value* is the "all" wildcard or names *user* in its list."""
+    if value.strip().lower() == "all":
+        return True
+    wanted = user.strip().lower().replace("_", " ")
+    return any(
+        item.strip().lower().replace("_", " ") == wanted
+        for item in value.split(",")
+    )
+
+
 def allowbots(text: str, user: str) -> bool:
     """Check the wiki's bot-exclusion template before an edit.
 
-    The {{bots}} template contract: {{bots|allow=<list>}} allows only the
-    listed bots, {{bots|deny=<list>}} blocks the listed bots, and "all" or
-    "none" act as wildcards. {{nobots}} blocks every bot. An allow-list that
-    does not name this bot blocks the edit.
+    The {{bots}} template contract: {{bots|allow=<list>}} lets only the
+    listed bots edit, {{bots|deny=<list>}} blocks the listed bots, and "all"
+    or "none" act as wildcards. {{nobots}} blocks every bot. A page is
+    editable only when no template blocks this bot and no allow-list omits
+    it. Commented-out templates and their parameters are ignored.
     """
-    escaped_user = re.escape(user)
-    deny_pattern = (r"\{\{(nobots|bots\|"
-                    r"(allow=none|deny=.*?" + escaped_user + r".*?"
-                    r"|optout=all|deny=all))\}\}")
-    if re.search(deny_pattern, text, flags=re.IGNORECASE):
-        return False
-    allow_pattern = (r"\{\{bots\|allow="
-                     r"(all|.*?" + escaped_user + r".*?)\}\}")
-    if re.search(allow_pattern, text, flags=re.IGNORECASE):
-        return True
-    if re.search(r"\{\{bots\|allow=.*?\}\}", text, flags=re.IGNORECASE):
-        return False
+    for name, body in _BOT_TEMPLATE.findall(_WIKITEXT_COMMENT.sub("", text)):
+        params = _parse_bot_params(body)
+        allow = params.get("allow")
+        deny = params.get("deny")
+        if name.lower() == "nobots" and allow is None and deny is None:
+            return False
+        if params.get("optout", "").lower() == "all":
+            return False
+        if deny is not None:
+            if deny.strip().lower() == "all" or _bot_list_allows(deny, user):
+                return False
+            continue
+        if allow is not None and not _bot_list_allows(allow, user):
+            return False
     return True
 
 
