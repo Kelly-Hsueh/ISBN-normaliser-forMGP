@@ -307,11 +307,26 @@ def get_csrf_token(
 
 
 def allowbots(text: str, user: str) -> bool:
+    """Check the wiki's bot-exclusion template before an edit.
+
+    The {{bots}} template contract: {{bots|allow=<list>}} allows only the
+    listed bots, {{bots|deny=<list>}} blocks the listed bots, and "all" or
+    "none" act as wildcards. {{nobots}} blocks every bot. An allow-list that
+    does not name this bot blocks the edit.
+    """
     escaped_user = re.escape(user)
-    pattern = (r"\{\{(nobots|bots\|"
-               r"(allow=none|deny=.*?" + escaped_user + r".*?"
-               r"|optout=all|deny=all))\}\}")
-    return not re.search(pattern, text, flags=re.IGNORECASE)
+    deny_pattern = (r"\{\{(nobots|bots\|"
+                    r"(allow=none|deny=.*?" + escaped_user + r".*?"
+                    r"|optout=all|deny=all))\}\}")
+    if re.search(deny_pattern, text, flags=re.IGNORECASE):
+        return False
+    allow_pattern = (r"\{\{bots\|allow="
+                     r"(all|.*?" + escaped_user + r".*?)\}\}")
+    if re.search(allow_pattern, text, flags=re.IGNORECASE):
+        return True
+    if re.search(r"\{\{bots\|allow=.*?\}\}", text, flags=re.IGNORECASE):
+        return False
+    return True
 
 
 def extract_main_content(page: dict[str, Any]) -> str | None:
