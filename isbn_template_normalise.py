@@ -28,8 +28,7 @@ from isbn_normalise import (
 )
 
 SPECIAL_NAMESPACE_ALIASES = frozenset({"special", "特殊"})
-BOOKSOURCE_PAGE_ALIASES = frozenset(
-    {"booksources", "書籍來源", "網絡書源", "網路書源", "网络书源"})
+BOOKSOURCE_PAGE_ALIASES = frozenset({"booksources", "書籍來源", "網絡書源", "網路書源", "网络书源"})
 
 # ---------------------------------------------------------------------------
 # Change report
