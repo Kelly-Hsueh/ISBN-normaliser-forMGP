@@ -8,13 +8,13 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import re
 import sys
 import time
 from pathlib import Path
 from typing import Any, Callable
 
 import brotli
+import mwparserfromhell
 import requests
 
 # ---------------------------------------------------------------------------
@@ -306,12 +306,47 @@ def get_csrf_token(
 # ---------------------------------------------------------------------------
 
 
+def _bot_list_allows(value: str, user: str) -> bool:
+    """True when *value* is the "all" wildcard or names *user* in its list."""
+    if value.strip().lower() == "all":
+        return True
+    wanted = user.strip().lower().replace("_", " ")
+    return any(
+        item.strip().lower().replace("_", " ") == wanted
+        for item in value.split(",")
+    )
+
+
 def allowbots(text: str, user: str) -> bool:
-    escaped_user = re.escape(user)
-    pattern = (r"\{\{(nobots|bots\|"
-               r"(allow=none|deny=.*?" + escaped_user + r".*?"
-               r"|optout=all|deny=all))\}\}")
-    return not re.search(pattern, text, flags=re.IGNORECASE)
+    """Check the wiki's bot-exclusion template before an edit.
+
+    The {{bots}} template contract: {{bots|allow=<list>}} lets only the
+    listed bots edit, {{bots|deny=<list>}} blocks the listed bots, and "all"
+    or "none" act as wildcards. {{nobots}} blocks every bot. A page is
+    editable only when no template blocks this bot and no allow-list omits
+    it. Commented-out templates are ignored.
+    """
+    for template in mwparserfromhell.parse(text).filter_templates():
+        name = str(template.name).strip().lower()
+        if name not in ("nobots", "bots"):
+            continue
+        params = {
+            str(param.name).strip().lower(): str(param.value).strip()
+            for param in template.params
+        }
+        allow = params.get("allow")
+        deny = params.get("deny")
+        if name == "nobots" and allow is None and deny is None:
+            return False
+        if params.get("optout", "").lower() == "all":
+            return False
+        if deny is not None:
+            if deny.lower() == "all" or _bot_list_allows(deny, user):
+                return False
+            continue
+        if allow is not None and not _bot_list_allows(allow, user):
+            return False
+    return True
 
 
 def extract_main_content(page: dict[str, Any]) -> str | None:
