@@ -8,13 +8,13 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import re
 import sys
 import time
 from pathlib import Path
 from typing import Any, Callable
 
 import brotli
+import mwparserfromhell
 import requests
 
 # ---------------------------------------------------------------------------
@@ -306,24 +306,6 @@ def get_csrf_token(
 # ---------------------------------------------------------------------------
 
 
-_WIKITEXT_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
-_BOT_TEMPLATE = re.compile(
-    r"\{\{\s*(nobots|bots)\s*(?:\|(.*?))?\}\}",
-    re.IGNORECASE | re.DOTALL,
-)
-
-
-def _parse_bot_params(body: str | None) -> dict[str, str]:
-    """Split a {{bots}} template body into its named parameters."""
-    params: dict[str, str] = {}
-    if not body:
-        return params
-    for part in body.split("|"):
-        key, sep, value = part.partition("=")
-        params[key.strip().lower()] = value.strip() if sep else ""
-    return params
-
-
 def _bot_list_allows(value: str, user: str) -> bool:
     """True when *value* is the "all" wildcard or names *user* in its list."""
     if value.strip().lower() == "all":
@@ -342,18 +324,24 @@ def allowbots(text: str, user: str) -> bool:
     listed bots edit, {{bots|deny=<list>}} blocks the listed bots, and "all"
     or "none" act as wildcards. {{nobots}} blocks every bot. A page is
     editable only when no template blocks this bot and no allow-list omits
-    it. Commented-out templates and their parameters are ignored.
+    it. Commented-out templates are ignored.
     """
-    for name, body in _BOT_TEMPLATE.findall(_WIKITEXT_COMMENT.sub("", text)):
-        params = _parse_bot_params(body)
+    for template in mwparserfromhell.parse(text).filter_templates():
+        name = str(template.name).strip().lower()
+        if name not in ("nobots", "bots"):
+            continue
+        params = {
+            str(param.name).strip().lower(): str(param.value).strip()
+            for param in template.params
+        }
         allow = params.get("allow")
         deny = params.get("deny")
-        if name.lower() == "nobots" and allow is None and deny is None:
+        if name == "nobots" and allow is None and deny is None:
             return False
         if params.get("optout", "").lower() == "all":
             return False
         if deny is not None:
-            if deny.strip().lower() == "all" or _bot_list_allows(deny, user):
+            if deny.lower() == "all" or _bot_list_allows(deny, user):
                 return False
             continue
         if allow is not None and not _bot_list_allows(allow, user):
