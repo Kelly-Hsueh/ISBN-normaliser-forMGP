@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import html
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -310,16 +311,44 @@ def is_valid_ean13(raw_value: str) -> bool:
             and is_valid_gs1(raw_value))
 
 
+def escape_template_label_text(value: str) -> str:
+    """Encode characters that would break out of a template parameter or an
+    HTML comment, as HTML entities that render as the same characters."""
+    escapes = {"{": "&#123;", "}": "&#125;", "<": "&lt;"}
+    return "".join(escapes.get(char, char) for char in value)
+
+
+def isbn_template_label_is_positional(
+    template_name: str,
+    code_value: str,
+    label_value: str,
+) -> bool:
+    """Report whether *label_value* survives as the single parameter 2 value."""
+    if "<!--" in label_value:
+        return False
+    probe = mwparserfromhell.nodes.Template(template_name)
+    probe.add("1", code_value)
+    probe.add("2", label_value)
+    parsed = mwparserfromhell.parse(str(probe)).filter_templates(recursive=False)
+    if len(parsed) != 1 or not parsed[0].has("2"):
+        return False
+    return html.unescape(str(parsed[0].get("2").value)) == label_value
+
+
 def build_isbn_template_node(
     code_value: str,
     label_value: str | None,
     template_name: str = "ISBN",
 ) -> Any:
+    template = mwparserfromhell.nodes.Template(template_name)
+    template.add("1", code_value)
     if label_value is None:
-        return mwparserfromhell.parse(
-            f"{{{{{template_name}|{code_value}}}}}").nodes[0]
-    return mwparserfromhell.parse(
-        f"{{{{{template_name}|{code_value}|{label_value}}}}}").nodes[0]
+        return template
+    if not isbn_template_label_is_positional(template_name,
+                                             code_value, label_value):
+        label_value = escape_template_label_text(label_value)
+    template.add("2", label_value)
+    return template
 
 
 def preferred_isbn_template_name(
