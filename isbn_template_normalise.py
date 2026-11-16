@@ -388,6 +388,7 @@ def build_booksource_replacement(
             return "", False, None, False
         return replacement, True, category, False
 
+    code_reformatted = reformatted
     label_raw = get_booksource_display_text(wikilink, "")
     label_isbn_raw = split_isbn_prefixed_label(label_raw)
     output_label = label_raw or None
@@ -404,7 +405,10 @@ def build_booksource_replacement(
 
     display_label = label_value if label_value is not None else output_label
     if are_semantically_equal_isbns(raw_value, display_label):
+        # The dropped label contributes no visible change, so report only
+        # whether the emitted ISBN code's formatting actually changed.
         display_label = None
+        reformatted = code_reformatted
     replacement = build_isbn_template_node(
         template_value,
         display_label,
