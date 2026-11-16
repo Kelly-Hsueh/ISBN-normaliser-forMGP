@@ -315,11 +315,11 @@ def build_isbn_template_node(
     label_value: str | None,
     template_name: str = "ISBN",
 ) -> Any:
-    if label_value is None:
-        return mwparserfromhell.parse(
-            f"{{{{{template_name}|{code_value}}}}}").nodes[0]
-    return mwparserfromhell.parse(
-        f"{{{{{template_name}|{code_value}|{label_value}}}}}").nodes[0]
+    template = mwparserfromhell.nodes.Template(template_name)
+    template.add("1", code_value)
+    if label_value is not None:
+        template.add("2", label_value)
+    return template
 
 
 def preferred_isbn_template_name(
