@@ -397,16 +397,17 @@ def build_booksource_replacement(
         reformatted = (reformatted
                        or (label_value is not None
                            and label_value != label_isbn_raw.strip()))
-        if are_semantically_equal_isbns(raw_value, label_isbn_raw):
-            output_label = None
     elif label_raw:
         label_value = normalise_if_isbn(label_raw, groups, convert_10_to_13)
         reformatted = (reformatted or (label_value is not None
                                        and label_value != label_raw.strip()))
 
+    display_label = label_value if label_value is not None else output_label
+    if are_semantically_equal_isbns(raw_value, display_label):
+        display_label = None
     replacement = build_isbn_template_node(
         template_value,
-        label_value if label_value is not None else output_label,
+        display_label,
         preferred_isbn_template_name(template_preferred_map),
     )
     return str(replacement), True, None, reformatted
