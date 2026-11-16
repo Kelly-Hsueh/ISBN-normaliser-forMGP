@@ -114,6 +114,22 @@ def isbn_equivalence_key(raw_isbn: str) -> str | None:
     return None
 
 
+def is_isbn_token(text: str) -> bool:
+    """Return True when the entire text is a single ISBN.
+
+    Only space and hyphen separators, and an ISBN-10 X check digit, may appear
+    around the digits. A string that merely contains an ISBN keeps its other
+    characters, so it is not an ISBN token and must not be normalised.
+    """
+    stripped = text.strip()
+    if not stripped or re.fullmatch(r"[0-9Xx][0-9Xx -]*", stripped) is None:
+        return False
+    if (len(only_digits(stripped)) == 13
+            and re.fullmatch(r"[0-9][0-9 -]*", stripped) is not None):
+        return True
+    return len(canonical_isbn10(stripped)) == 10
+
+
 def parse_range_text(range_text: str) -> tuple[int, int]:
     start_text, end_text = range_text.split("-", 1)
     return int(start_text), int(end_text)

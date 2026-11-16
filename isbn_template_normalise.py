@@ -21,6 +21,7 @@ from isbn_normalise import (
     is_valid_gs1,
     is_valid_isbn10,
     is_valid_isbn13,
+    is_isbn_token,
     hyphenate_isbn10,
     hyphenate_isbn13,
     load_groups,
@@ -111,16 +112,31 @@ def get_template_label_value(
     label_str = str(template.get("2").value).strip()
     if not label_str:
         return None
-    normalised = try_normalise_template_value(label_str, groups,
-                                              convert_10_to_13)
+    normalised = normalise_label_if_isbn(label_str, groups, convert_10_to_13)
     return normalised if normalised is not None else label_str
+
+
+def normalise_label_if_isbn(
+    label: str,
+    groups: list[Group],
+    convert_10_to_13: bool,
+) -> str | None:
+    """Normalise a display label only when the whole label is an ISBN.
+
+    A label that merely contains an ISBN (for example a BookSources label such
+    as "ISBN 9787302511625（精装）") keeps its surrounding text, so the page's
+    visible label is never discarded.
+    """
+    if not is_isbn_token(label):
+        return None
+    return try_normalise_template_value(label, groups, convert_10_to_13)
 
 
 def are_semantically_equal_isbns(
     code_str: str,
     output_label: str | None,
 ) -> bool:
-    if output_label is None:
+    if output_label is None or not is_isbn_token(output_label):
         return False
     key1 = isbn_equivalence_key(code_str)
     key2 = isbn_equivalence_key(output_label)
@@ -391,7 +407,8 @@ def build_booksource_replacement(
     label_raw = get_booksource_display_text(wikilink, "")
     label_isbn_raw = split_isbn_prefixed_label(label_raw)
     output_label = label_raw or None
-    label_value = (normalise_if_isbn(label_isbn_raw, groups, convert_10_to_13)
+    label_value = (normalise_label_if_isbn(label_isbn_raw, groups,
+                                          convert_10_to_13)
                    if label_isbn_raw is not None else None)
     if label_isbn_raw is not None:
         reformatted = (reformatted
@@ -400,7 +417,8 @@ def build_booksource_replacement(
         if are_semantically_equal_isbns(raw_value, label_isbn_raw):
             output_label = None
     elif label_raw:
-        label_value = normalise_if_isbn(label_raw, groups, convert_10_to_13)
+        label_value = normalise_label_if_isbn(label_raw, groups,
+                                              convert_10_to_13)
         reformatted = (reformatted or (label_value is not None
                                        and label_value != label_raw.strip()))
 
