@@ -116,6 +116,11 @@ def get_template_label_value(
     return normalised if normalised is not None else label_str
 
 
+def has_template_delimiters(text: str) -> bool:
+    """Return True when *text* contains wikitext template braces."""
+    return "{{" in text or "}}" in text
+
+
 def normalise_label_if_isbn(
     label: str,
     groups: list[Group],
@@ -126,10 +131,15 @@ def normalise_label_if_isbn(
     A label that merely contains an ISBN (for example a BookSources label such
     as "ISBN 9787302511625（精装）") keeps its surrounding text, so the page's
     visible label is never discarded.
+
+    A label that carries template braces ("{{" or "}}") is not safe to place in
+    the generated template, because the braces would be read as template syntax.
+    Such a label is normalised instead, so its text cannot break or inject into
+    the template.
     """
-    if not is_isbn_token(label):
-        return None
-    return try_normalise_template_value(label, groups, convert_10_to_13)
+    if is_isbn_token(label) or has_template_delimiters(label):
+        return try_normalise_template_value(label, groups, convert_10_to_13)
+    return None
 
 
 def are_semantically_equal_isbns(
