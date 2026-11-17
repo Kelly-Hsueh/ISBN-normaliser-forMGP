@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +22,7 @@ from isbn_normalise import (
     is_valid_gs1,
     is_valid_isbn10,
     is_valid_isbn13,
+    is_isbn_token,
     hyphenate_isbn10,
     hyphenate_isbn13,
     load_groups,
@@ -111,16 +113,14 @@ def get_template_label_value(
     label_str = str(template.get("2").value).strip()
     if not label_str:
         return None
-    normalised = try_normalise_template_value(label_str, groups,
-                                              convert_10_to_13)
-    return normalised if normalised is not None else label_str
+    return normalise_label_isbn(label_str, groups, convert_10_to_13)
 
 
 def are_semantically_equal_isbns(
     code_str: str,
     output_label: str | None,
 ) -> bool:
-    if output_label is None:
+    if output_label is None or not is_isbn_token(output_label):
         return False
     key1 = isbn_equivalence_key(code_str)
     key2 = isbn_equivalence_key(output_label)
@@ -226,6 +226,34 @@ def normalise_if_isbn(
     if key is None:
         return None
     return try_normalise_template_value(raw_value, groups, convert_10_to_13)
+
+
+_ISBN_RUN_RE = re.compile(r"[0-9][0-9 \-]*[0-9Xx]")
+
+
+def normalise_label_isbn(
+    label: str,
+    groups: list[Group],
+    convert_10_to_13: bool,
+) -> str:
+    """Hyphenate the ISBN inside a display label and keep the other text.
+
+    A display label may carry text beside its ISBN, such as a binding note
+    ("精装 9787302511625"). Only the ISBN run is normalised, so the
+    note stays on the page. A label with no valid ISBN is returned unchanged.
+    """
+    text = label.strip()
+    for match in reversed(list(_ISBN_RUN_RE.finditer(text))):
+        normalised = normalise_if_isbn(match.group(0), groups,
+                                       convert_10_to_13)
+        if normalised is not None:
+            text = f"{text[:match.start()]}{normalised}{text[match.end():]}"
+    return text
+
+
+def label_isbn_core(label: str) -> str:
+    """Return the label without a leading "ISBN" prefix, when it has one."""
+    return split_isbn_prefixed_label(label) or label.strip()
 
 
 def is_isbn_shaped(raw_value: str) -> bool:
@@ -388,25 +416,25 @@ def build_booksource_replacement(
             return "", False, None, False
         return replacement, True, category, False
 
+    code_reformatted = reformatted
     label_raw = get_booksource_display_text(wikilink, "")
-    label_isbn_raw = split_isbn_prefixed_label(label_raw)
-    output_label = label_raw or None
-    label_value = (normalise_if_isbn(label_isbn_raw, groups, convert_10_to_13)
-                   if label_isbn_raw is not None else None)
-    if label_isbn_raw is not None:
-        reformatted = (reformatted
-                       or (label_value is not None
-                           and label_value != label_isbn_raw.strip()))
-        if are_semantically_equal_isbns(raw_value, label_isbn_raw):
-            output_label = None
-    elif label_raw:
-        label_value = normalise_if_isbn(label_raw, groups, convert_10_to_13)
-        reformatted = (reformatted or (label_value is not None
-                                       and label_value != label_raw.strip()))
-
+    display_label = None
+    if label_raw:
+        display_label = normalise_label_isbn(label_raw, groups,
+                                             convert_10_to_13)
+        core = label_isbn_core(display_label)
+        if is_isbn_token(core) and are_semantically_equal_isbns(
+                template_value, core):
+            # The label holds nothing but the ISBN, so the default link text
+            # already shows it. Drop the label and report only whether the
+            # ISBN code's own formatting changed.
+            display_label = None
+        else:
+            reformatted = (code_reformatted
+                           or display_label != label_raw.strip())
     replacement = build_isbn_template_node(
         template_value,
-        label_value if label_value is not None else output_label,
+        display_label,
         preferred_isbn_template_name(template_preferred_map),
     )
     return str(replacement), True, None, reformatted
