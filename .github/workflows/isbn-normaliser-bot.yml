@@ -2,6 +2,11 @@ name: ISBN Normaliser Bot
 permissions:
   contents: read
 
+concurrency:
+  # The fallback firing must not overlap the primary run.
+  group: isbn-normaliser-bot
+  cancel-in-progress: false
+
 on:
   workflow_dispatch:
     inputs:

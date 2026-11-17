@@ -14,21 +14,21 @@ jobs:
   check-last-run:
     runs-on: ubuntu-latest
     steps:
-      - name: Fail when the bot has not run for more than 62 days
+      - name: Fail when the bot has not run on schedule for more than 62 days
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          latest=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/isbn-normaliser-bot.yml/runs?per_page=1" --jq ".workflow_runs[0].created_at // empty")
+          latest=$(gh run list --workflow isbn-normaliser-bot.yml --event schedule --limit 1 --json createdAt --jq ".[0].createdAt // empty")
           if [ -z "$latest" ]; then
-            echo "::error::The ISBN Normaliser Bot has no recorded run."
+            echo "::error::The ISBN Normaliser Bot has no schedule-triggered run on record."
             exit 1
           fi
           now=$(date -u +%s)
           last=$(date -u -d "$latest" +%s)
           age_days=$(( (now - last) / 86400 ))
-          echo "Last ISBN Normaliser Bot run: $latest ($age_days days ago)"
+          echo "Newest schedule-triggered ISBN Normaliser Bot run: $latest ($age_days days ago)"
           if [ "$age_days" -gt 62 ]; then
-            echo "::error::The ISBN Normaliser Bot has not run for $age_days days, so its two-monthly schedule may have stopped firing."
+            echo "::error::The ISBN Normaliser Bot has not run on schedule for $age_days days, so its two-monthly schedule may have stopped firing."
             exit 1
           fi
