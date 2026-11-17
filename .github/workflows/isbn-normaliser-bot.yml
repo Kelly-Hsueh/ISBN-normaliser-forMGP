@@ -24,7 +24,12 @@ on:
         required: false
         default: ""
   schedule:
+    # The two-monthly run rides on a single best-effort GitHub scheduled firing.
+    # GitHub drops a queued run when its queue is under load, and one missed
+    # firing skips a whole two-month cycle, so a second firing later the same day
+    # is a fallback. The job is safe to repeat: an already normalised page is a no-op.
     - cron: "15 20 1 */2 *"
+    - cron: "45 23 1 */2 *"
 
 jobs:
   normalise-isbn:
