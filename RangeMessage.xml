@@ -17,8 +17,8 @@
 ]>
 <ISBNRangeMessage>
   <MessageSource>International ISBN Agency</MessageSource>
-  <MessageSerialNumber>24f2a01c-2ab2-44fd-a5f3-9d09929ee09e</MessageSerialNumber>
-  <MessageDate>Wed, 11 Nov 2026 10:29:10 UTC</MessageDate>
+  <MessageSerialNumber>da2230b2-03dc-45fd-b73c-82ed38edb8d3</MessageSerialNumber>
+  <MessageDate>Wed, 18 Nov 2026 18:56:43 UTC</MessageDate>
   <EAN.UCCPrefixes>
     <EAN.UCC>
       <Prefix>978</Prefix>
@@ -1463,11 +1463,11 @@
       <Agency>Türkiye</Agency>
       <Rules>
         <Rule>
-          <Range>0000000-0199999</Range>
+          <Range>0000000-0299999</Range>
           <Length>2</Length>
         </Rule>
         <Rule>
-          <Range>0200000-2999999</Range>
+          <Range>0300000-2999999</Range>
           <Length>0</Length>
         </Rule>
         <Rule>
