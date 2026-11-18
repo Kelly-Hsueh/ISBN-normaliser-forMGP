@@ -24,6 +24,7 @@ jobs:
           fetch() {
             rm -f "$tmp"
             response=$(curl --silent --show-error --location --proto-redir =https \
+              --connect-timeout 15 --max-time 120 \
               --write-out '%{http_code} %{url_effective}' --output "$tmp" "$url") || {
                 reason="curl exited with status $?"
                 return 1
@@ -63,8 +64,10 @@ jobs:
           while true; do
             reason=""
             if fetch; then
-              mv "$tmp" RangeMessage.xml
-              break
+              if mv "$tmp" RangeMessage.xml; then
+                break
+              fi
+              reason="the validated file could not be moved into place"
             fi
             echo "Download attempt $attempt failed: $reason" >&2
             if [ "$attempt" -ge "$max_attempts" ]; then
