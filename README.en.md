@@ -149,6 +149,7 @@ File: `.github/workflows/isbn-normaliser-bot.yml`
 
 2. **Scheduled execution**
   - Runs automatically on the 1st of every other month at UTC `20:15` (cron: `15 20 1 */2 *`)
+  - If that firing is missed, a fallback fires at UTC `23:45` the same day (cron: `45 23 1 */2 *`). It skips the bot run when a scheduled run already succeeded within the previous 12 hours
 
 3. **Running multiple strategies (optional)**
   - Use a GHA matrix to run strategies in parallel:

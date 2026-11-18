@@ -19,7 +19,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          latest=$(gh run list --workflow isbn-normaliser-bot.yml --event schedule --limit 1 --json createdAt --jq ".[0].createdAt // empty")
+          latest=$(gh run list --repo "${{ github.repository }}" --workflow isbn-normaliser-bot.yml \
+            --event schedule --limit 1 --json createdAt --jq ".[0].createdAt // empty")
           if [ -z "$latest" ]; then
             echo "::error::The ISBN Normaliser Bot has no schedule-triggered run on record."
             exit 1
