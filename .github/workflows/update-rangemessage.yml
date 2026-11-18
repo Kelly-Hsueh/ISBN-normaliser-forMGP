@@ -15,26 +15,33 @@ jobs:
 
       - name: Download RangeMessage.xml
         run: |
-          set -euo pipefail
+          set -uo pipefail
           url="https://www.isbn-international.org/export_rangemessage.xml"
           tmp="RangeMessage.xml.tmp"
-          rm -f "$tmp"
-          response=$(curl --silent --show-error --location --proto-redir =https \
-            --write-out '%{http_code} %{url_effective}' --output "$tmp" "$url")
-          status=${response%% *}
-          final_url=${response#* }
-          case "$final_url" in
-            "https://isbn-international.org/"*|"https://www.isbn-international.org/"*) ;;
-            *)
-              echo "Refusing download from untrusted redirect target: $final_url" >&2
-              exit 1
-              ;;
-          esac
-          if [ "$status" != "200" ]; then
-            echo "Download returned HTTP $status, expected 200" >&2
-            exit 1
-          fi
-          python3 - "$tmp" <<'PY'
+          max_attempts=3
+          retry_delay=10
+
+          fetch() {
+            rm -f "$tmp"
+            response=$(curl --silent --show-error --location --proto-redir =https \
+              --write-out '%{http_code} %{url_effective}' --output "$tmp" "$url") || {
+                reason="curl exited with status $?"
+                return 1
+              }
+            status=${response%% *}
+            final_url=${response#* }
+            case "$final_url" in
+              "https://isbn-international.org/"*|"https://www.isbn-international.org/"*) ;;
+              *)
+                echo "Refusing download from untrusted redirect target: $final_url" >&2
+                exit 1
+                ;;
+            esac
+            if [ "$status" != "200" ]; then
+              reason="the download returned HTTP $status, expected 200"
+              return 1
+            fi
+            if ! python3 - "$tmp" <<'PY'
           import sys
           from pathlib import Path
 
@@ -45,7 +52,29 @@ jobs:
               raise SystemExit("RangeMessage.xml holds no usable ISBN registration groups")
           print(f"Validated {len(groups)} registration groups")
           PY
-          mv "$tmp" RangeMessage.xml
+            then
+              reason="the downloaded RangeMessage.xml did not validate"
+              return 1
+            fi
+            return 0
+          }
+
+          attempt=1
+          while true; do
+            reason=""
+            if fetch; then
+              mv "$tmp" RangeMessage.xml
+              break
+            fi
+            echo "Download attempt $attempt failed: $reason" >&2
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "Gave up on RangeMessage.xml after $attempt download attempts" >&2
+              exit 1
+            fi
+            echo "Retrying in ${retry_delay}s" >&2
+            sleep "$retry_delay"
+            attempt=$((attempt + 1))
+          done
 
       - name: Commit and push changes
         run: |
