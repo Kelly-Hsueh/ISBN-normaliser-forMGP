@@ -437,7 +437,7 @@ def build_booksource_replacement(
         display_label,
         preferred_isbn_template_name(template_preferred_map),
     )
-    return str(replacement), True, None, reformatted
+    return str(replacement), False, None, reformatted
 
 
 # ---------------------------------------------------------------------------
